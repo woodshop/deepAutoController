@@ -39,7 +39,7 @@ The play  button plays the original audio file (reconstructed from the inverse C
 
 Example running command:
 
-	python autocontrol.py data/16_8.model.npy data/wav/SOALANG12AF72A783F.wav --plot
+	python autocontrol.py {modelFile} {audioFile} --plot
 
 ### deepAE.py
 Implementation of a deep autoencoder with some helper functions for reconstruction of the code layer and output.
@@ -51,9 +51,11 @@ This code is based on the Theano stacked denoising autoencoder tutorial. The mai
 * A couple of helper functions are provided to rebuild a saved model and plot results
 * The learned model parameters are saved, along with input variables cost curves, and an arbitrary example of an original input and its reconstruction.
 
-Example running command:
+Example command:
 
-	python deepAE.py 16 8 -o ~/Desktop/ -d ../data/allcqft.npy
+	python deepAE.py l1 l2 l3 -o ~/Desktop/ -d {dataFile}
+
+where l1, l2, and l3 are the sizes of the hidden layers.
 
 ### dA.py
 This is a modified version of the denoising autoencoder tutorial provided at http://deeplearning.net/tutorial/dA.html
@@ -63,5 +65,7 @@ The modifications are very minor. In particular, two variables are added:
 * nl (bool) : if False the hidden units are linear
 * mult (theano.shared) : provides a mechanism for multiplying the weights and the input of each hidden unit. No error checking is provided. mult should be a theano shared variable holding an  dimensional array of floats. The length of the array should be the same as the number of hidden units.
  
+This module is imported by deepAE.py
+
 ### deepAEFeatures.py
 Use this code as a guide for extracting a dataset of CQFT features.
