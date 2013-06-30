@@ -1,3 +1,6 @@
+"""
+Use this code as a guide for extracting a dataset of CQFT features.
+"""
 import bregman
 from scipy import io
 import numpy as np
@@ -33,7 +36,7 @@ class Batch():
             np.savez(data_file, CQFT=F.CQFT, POWER=F.POWER, Q=F.Q,
                     STFT=F.STFT, feature_params=F.feature_params)
 
-def collect(data_base='/global/data/casey/sarroff/projects/hamr/data'):
+def collect(data_base=',,./data'):
     allkeys = np.load(data_base+'/allkeys.npy')
     tmp = np.load(data_base+'/cqft/'+allkeys[0]+'.cqft.npz')['CQFT'].shape
     allcqft = np.empty((len(allkeys), tmp[0]*tmp[1]))

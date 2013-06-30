@@ -1,3 +1,15 @@
+"""
+    Use a Korg nonoKONTROL2 to control the weights of a n autoencoder. Given 
+    a learned model. The Korg attaches to the input of the center (topmost
+    encoding layer). The faders of the Korg may be used to multiply the incoming 
+    weights. Use the faders as a multiplier, use the knobs to change the range
+    of the faders. Use the solo buttons to reverse the sign of the multiplier. 
+    An output screen shows in real time the scale and multipler values.
+    
+    The play  button plays the original audio file (reconstructed from the 
+    inverse CQFT. The record button plays the inverse resynthesized CQFT
+    as output by the autoencoder. The stop button quits the application.
+"""
 import argparse
 import deepAE
 import bregman
@@ -24,9 +36,12 @@ class Autocontrol(object):
                                              dtype=theano.config.floatX), 
                                borrow=True)
         self.model = deepAE.rebuild(modelFile, self.mult)
-        self.set_f_params()
         # HARD CODED: USE 5 seconds of audio file starting at 1.0 secs
-        self.x = bregman.sound.WavOpen(audioFile, 6*22050).sig[22050:]
+        # WARNING: assumes 22050 sr. Duration of clip will vary based upon 
+        # actual sr
+        w = bregman.sound.WavOpen(audioFile, 6*22050, verbosity=0)
+        self.x = w.sig[22050:]
+        self.set_f_params(w.sample_rate)
         self.F = bregman.features.Features(self.x, self.p)
         self.x_hat_orig = self.F.inverse(usewin=False)
         self.x_hat_orig -= self.x_hat_orig.min()
@@ -41,13 +56,13 @@ class Autocontrol(object):
         self.scale = np.ones(NNEURONS)
         self.start_screen()
 
-    def set_f_params(self):
-        # HARD CODED: Same feature params used to train models
+    def set_f_params(self, sr):
+        # HARD CODED: Same feature params used to train models in deepAE.py
         p = bregman.features.Features().default_feature_params()
         p['hi'] = 10000
         p['nfft'] = 2048
         p['nhop'] = 1024
-        p['sample_rate'] = 22050
+        p['sample_rate'] = sr
         p['wfft'] = 2048
         self.p = p
     
@@ -78,7 +93,7 @@ class Autocontrol(object):
         text = self.font.render('Scale',1,(255,255,255))
         self.screen.blit(text, (150,20))
         text = self.font.render('Value',1,(255,255,255))
-        self.screen.blit(text, (250,20))
+        self.screen.blit(text, (300,20))
         for i in range(NNEURONS):
             text = self.font.render('{0}'.format(i+1), 1, (255,255,255))
             self.screen.blit(text, (20,(i+2)*30))
@@ -86,7 +101,7 @@ class Autocontrol(object):
             self.screen.blit(text, (150,(i+2)*30))
             text = self.font.render("%.5f" % self.mult.get_value()[i], 1, 
                                     (255,255,255))
-            self.screen.blit(text, (250,(i+2)*30))
+            self.screen.blit(text, (300,(i+2)*30))
         pygame.display.flip()
 
     def run(self):
@@ -96,23 +111,22 @@ class Autocontrol(object):
                 data = self.cont.read(BUF)
                 ctrl = data[-1][0][1]
                 val = data[-1][0][2]
-                if ctrl == 42 and val == 127: # stop
+                if ctrl == 42 and val == 127: # stop button
                     self.exit()
                     break
-                if ctrl == 45 and val == 127: # record
+                if ctrl == 45 and val == 127: # record button
                     self.synth()
-                if ctrl == 41 and val == 127: # play
+                if ctrl == 41 and val == 127: # play button
                     self.play_orig()
-                if ctrl >= 0 and ctrl <= 8:
+                if ctrl >= 0 and ctrl <= 8: # faders
                     self.level[ctrl] = val/127.
                     self.update_mult()
-                if ctrl >= 16 and ctrl <= 24:
+                if ctrl >= 16 and ctrl <= 24: # knobs
                     self.scale[ctrl-16] = val/127. * 10
                     self.update_mult()
-                if ctrl >= 32 and ctrl <= 40:
+                if ctrl >= 32 and ctrl <= 40: # solo buttons
                     self.sign[ctrl-32] = -1. if val == 127 else 1.
                     self.update_mult()
-        return
 
     def empty(self):
         while self.cont.poll():
@@ -123,6 +137,7 @@ class Autocontrol(object):
         self.update_text()
             
     def synth(self):
+    	# Shape has been hard coded
         self.F.X = self.model.reconstruct_input_ext(self.model_in
                                                     )[-1].eval().reshape(87, 
                                                                          -1)
@@ -154,7 +169,10 @@ class Autocontrol(object):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Use a MIDI controller to inspect the code layer of a '+ \
-            'deep autoencoder.')
+            'deep autoencoder. '+\
+            'Command: python autocontrol.py modelFile audioFile [--plot] '+\
+            'where modelfile is the filename of the model saved by using '+\
+            'deepAE.py audioFile is a')
     parser.add_argument('modelFile', type=str, 
                         help="a deep autoencoder trained with deepAE.py")
     parser.add_argument('audioFile', type=str, 

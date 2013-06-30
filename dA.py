@@ -1,4 +1,16 @@
 """
+ This is a modified version of the denoising autoencoder tutorial provided at
+ http://deeplearning.net/tutorial/dA.html
+ 
+ The modifications are very minor. In particular, two variables are added:
+ nl (bool) : if False the hidden units are linear
+ mult (theano.shared) : provides a mechanism for multiplying the weights and the input of
+   each hidden unit. No error checking is provided. mult should be a theano shared 
+   variable holding an  dimensional array of floats. The length of the array should be 
+   the same as the number of hidden units.
+ 
+ The original documentation for dA.py is preserved below.
+ 
  This tutorial introduces denoising auto-encoders (dA) using Theano.
 
  Denoising autoencoders are the building blocks for SdA.

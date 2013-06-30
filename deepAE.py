@@ -1,29 +1,17 @@
-
 """
- Implementation of a deep autoencoder optimized for semantic hashing, as
- reported by Salakhutdinov and Hinton, 2009.
+ Implementation of a deep autoencoder with some helper functions for 
+ reconstruction of the code layer and output.
 
- This code uses the Theano stacked denoising autoencoder tutoial for many of
- the basic components. The main differences between this code and the tutorial
- are:
+ This code is based on the Theano stacked denoising autoencoder tutorial. The 
+ main differences between this code and the tutorial are:
    * This is a deep autoencoder, the tutorial shows a stacked autoencoder
    * In order to implement a deepautoencoder, the model is unfolded into
        its symmetrical upper half.
-   * While the denoising functionality has been kept, it hasn't been tested.
-   * Normally sampled noise is added to the input of the center layer
-   *  during finetuning to encourage binary activation. The noise is resampled
-      for each minibatch.
-
- The main differences between this code and Salakhutdinov and Hinton (2009)
- are:
-   * They use momentum and weight decay. These haven't been implemented.
-   * The first visible layer of their paper uses a constrained Poisson model
-     for word counts. The input to the first layer in this code are real
-     numbers in the range [0, 1]
-  *  The finetuning stage in the paper imployes conugated gradient descent
-     with three line searches. We use back propagation of the sum square error
-  *  The paper has a code threshold of 0.1 for binarizing the code layer. It
-     is currently hard-set to 0.5 in this code.
+   * A couple of helper functions are provided to rebuild a saved model and 
+       plot results
+   * The learned model parameters are saved, along with input variables cost 
+       curves, and an arbitrary example of an original input and its 
+       reconstruction.
 """
 import sys
 import time
@@ -62,10 +50,8 @@ class deepAE(object):
         self.theano_rng = theano_rng
         self.n_ins = n_ins
         self.unrolled = False
-        #if corruption_levels is None:
-        #    corruption_levels = [0] * len(hidden_layers_sizes)
         if corruption_levels is None:
-            corruption_levels = [0.5] * len(hidden_layers_sizes)
+            corruption_levels = [0] * len(hidden_layers_sizes)
         self.corruption_levels = corruption_levels
 
         self.x = T.matrix('x')
@@ -233,29 +219,31 @@ class deepAE(object):
         index = T.lscalar('index')  # index to a [mini]batch
 
         # compute the gradients with respect to the model parameters
-        #gparams = T.grad(self.cross_entropy(), self.params)
-        gparams = T.grad(self.mean_sq_diff(), self.params)
+        c_func = self.mean_sq_diff()
+        #c_func = self.cross_entropy()
+        gparams = T.grad(c_func, self.params)
 
         # compute list of fine-tuning updates
         updates = []
         for param, gparam in zip(self.params, gparams):
             updates.append((param, param - gparam * self.ft_lr))
 
+
         train_fn = theano.function(inputs=[index],
-              outputs=self.cross_entropy(),
+              outputs=c_func,
               updates=updates,
               givens={
                   self.x: self.train_set[index * self.ft_bs:
                                       (index + 1) * self.ft_bs]})
 
         valid_score_i = theano.function(inputs=[index],
-                outputs=self.cross_entropy(),
+                outputs=c_func,
                 givens={
                     self.x: self.valid_set[index * self.ft_bs:
                                         (index + 1) * self.ft_bs]})
 
         test_score_i = theano.function(inputs=[index],
-                outputs=self.cross_entropy(),
+                outputs=c_func,
                 givens={
                     self.x: self.test_set[index * self.ft_bs:
                                        (index + 1) * self.ft_bs]})
@@ -431,6 +419,11 @@ class deepAE(object):
         return y[-1]
 
     def reconstruct_input(self, ix):
+    	"""
+    	Use this function to reconstruct the input from an example in the test 
+        set before the model has been saved. If using a reconstructed model and
+        arbitrary data, use reconstruct_input_ext
+    	"""
         y = [self.code_out(ix)]
         for i in xrange(self.n_layers):
             if i == 0:
@@ -442,6 +435,14 @@ class deepAE(object):
         return y[-1]
 
     def reconstruct_input_ext(self, model_in):
+    	"""
+    	Perform an autoencoding reconstruction given an arbitrary input. No 
+        error checking is performed. The variable model_in must be a theano 
+        shared tensor having the same number of variables ast the data that 
+        was used to train the model. Multiple observations may be given. The 
+        data should have observations along the rows and variables along the 
+        columns.
+    	"""
         y = []
         for i in xrange(self.n_layers*2):
             if i == 0:
@@ -453,7 +454,7 @@ class deepAE(object):
 def test_model(debug=False, path=None, **kwargs):
     rng = numpy.random.RandomState(SEED)
     if path is None:
-        path = '/global/data/casey/sarroff/projects/hamr/data/allcqft.npy'
+        path = '../data/allcqft.npy'
     datasets = numpy.load(path, mmap_mode=None)
     if debug:
         print('DEBUGGING ON')
@@ -461,7 +462,7 @@ def test_model(debug=False, path=None, **kwargs):
     nobs,nvars = datasets.shape
     model = deepAE(n_ins=nvars, **kwargs)
     model.init_layers()
-    model.set_train_vars(datasets=datasets)
+    model.set_train_vars(datasets=datasets, ft_epochs=100)
     model.pretrain()
     model.unroll()
     model.finetune()
@@ -482,12 +483,15 @@ def wrap_model_params(model):
     p['pt_epochs'] = model.pt_epochs
     p['pt_bs'] = model.pt_bs
     p['ft_lr'] = model.ft_lr
-    p['ft_epochs'] = model.ft_epochs=1000
+    p['ft_epochs'] = model.ft_epochs
     p['ft_bs'] = model.ft_bs=20
     p['ft_thr'] = model.ft_thr
     return p
 
 def rebuild(data, mult=None):
+    """
+    Rebuild a model using the saved l1_l2_l3.model.npy output file.
+    """
     if data.__class__ is str:
         data = numpy.load(data).item()
     p = data['params']
@@ -503,6 +507,11 @@ def rebuild(data, mult=None):
     return model
 
 def plot_orig_recon(model, orig, recon):
+    """
+    Plot the saved original and reconstructed data saved during model 
+    training. WARNING: The number of variables has been hard-coded. Edit this 
+    code as necessary.
+    """
     pyplot.clf()
     t = '-'.join(str(i) for i in model.hidden_layers_sizes)
     pyplot.subplot(2,1,1)
@@ -539,9 +548,21 @@ def plot_training(model, pt_costs, ft_costs):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Build and test deep autoencoder for semantic hashing.')
-    parser.add_argument('hidden_layers_sizes', nargs='*', type=int)
-    parser.add_argument('-o', dest='outpath')
-    parser.add_argument('-d', dest='datapath')
+    parser.add_argument('hidden_layers_sizes', nargs='*', type=int, 
+                        help='a list  of the hidden layer sizes separates '+\
+                            'by spaces. Ex: 2048 512 512 8')
+    parser.add_argument('-o', dest='outpath', 
+                        help='the directory where the model should be '+\
+                            'stored. The name of the file will be '+\
+                            'outpath/l1_l2_l3.model.npy where l1 l2 l3 are '+\
+                            'the sizes of the hidden layers.')
+    parser.add_argument('-d', dest='datapath',
+                        help='the location of the training data. The '+\
+                            'application expects a npy array where each '+\
+                            'row is an observation and each column is a '+\
+                            'variable. The data is randomly permuted and '+\
+                            'split equally into training, vakidation, and '+\
+                            'test data sets.')
     parser.add_argument('--debug', action='store_true')
     args = parser.parse_args()
     res = test_model(hidden_layers_sizes=args.hidden_layers_sizes,
