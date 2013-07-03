@@ -219,8 +219,8 @@ class deepAE(object):
         index = T.lscalar('index')  # index to a [mini]batch
 
         # compute the gradients with respect to the model parameters
-        c_func = self.mean_sq_diff()
-        #c_func = self.cross_entropy()
+        #c_func = self.mean_sq_diff()
+        c_func = self.cross_entropy()
         gparams = T.grad(c_func, self.params)
 
         # compute list of fine-tuning updates
@@ -516,11 +516,11 @@ def plot_orig_recon(model, orig, recon):
     t = '-'.join(str(i) for i in model.hidden_layers_sizes)
     pyplot.subplot(2,1,1)
     # HARD CODED!
-    pyplot.imshow(orig.reshape(87,-1)[2:], origin='lower', aspect='auto')
+    pyplot.imshow(orig.reshape(87,-1), origin='lower', aspect='auto')
     pyplot.title(t)
     pyplot.ylabel('Freq Band')
     pyplot.subplot(2,1,2)
-    pyplot.imshow(recon.reshape(87,-1)[2:], origin='lower', aspect='auto')
+    pyplot.imshow(recon.reshape(87,-1), origin='lower', aspect='auto')
     pyplot.xlabel('Time')
     pyplot.ylabel('Freq Band')
 

@@ -36,13 +36,13 @@ class Batch():
             np.savez(data_file, CQFT=F.CQFT, POWER=F.POWER, Q=F.Q,
                     STFT=F.STFT, feature_params=F.feature_params)
 
-def collect(data_base=',,./data'):
+def collect(data_base='../data'):
     allkeys = np.load(data_base+'/allkeys.npy')
     tmp = np.load(data_base+'/cqft/'+allkeys[0]+'.cqft.npz')['CQFT'].shape
     allcqft = np.empty((len(allkeys), tmp[0]*tmp[1]))
     for i,k in enumerate(allkeys):
         print(float(i)/len(allkeys))
-        allcqft[i] = np.load(data_base+'/cqft/'+allkeys[0]+'.cqft.npz'
+        allcqft[i] = np.load(data_base+'/cqft/'+allkeys[i]+'.cqft.npz'
                              )['CQFT'].flatten()
     return allcqft
 
