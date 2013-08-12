@@ -1,0 +1,29 @@
+!obj:pylearn2.train.Train {
+    dataset: &dataset !obj:deepAE2.sevdig8000 { },
+    model: !obj:pylearn2.models.autoencoder.Autoencoder {
+        nvis : 87,
+        nhid : 32,
+        irange : 0.05,
+        act_enc: "sigmoid",
+        act_dec: Null
+    },
+    algorithm: !obj:pylearn2.training_algorithms.sgd.SGD {
+        learning_rate : 1e-3,
+        batch_size : 100,
+        monitoring_batches : 5,
+        monitoring_dataset : *dataset,
+        cost : !obj:pylearn2.costs.autoencoder.MeanSquaredReconstructionError {},
+        termination_criterion : !obj:pylearn2.termination_criteria.Or {
+            criteria : [
+            !obj:pylearn2.termination_criteria.MonitorBased {
+                channel_name : "learning_rate"
+            },
+            !obj:pylearn2.termination_criteria.EpochCounter {
+                max_epochs: 250
+            }
+        ]},
+        init_momentum : .5
+    },
+    save_path : "./deepAE.pkl",
+    save_freq : 1
+}
