@@ -1,16 +1,16 @@
 """
- Implementation of a deep autoencoder with some helper functions for 
+ Implementation of a deep autoencoder with some helper functions for
  reconstruction of the code layer and output.
 
- This code is based on the Theano stacked denoising autoencoder tutorial. The 
+ This code is based on the Theano stacked denoising autoencoder tutorial. The
  main differences between this code and the tutorial are:
    * This is a deep autoencoder, the tutorial shows a stacked autoencoder
    * In order to implement a deepautoencoder, the model is unfolded into
        its symmetrical upper half.
-   * A couple of helper functions are provided to rebuild a saved model and 
+   * A couple of helper functions are provided to rebuild a saved model and
        plot results
-   * The learned model parameters are saved, along with input variables cost 
-       curves, and an arbitrary example of an original input and its 
+   * The learned model parameters are saved, along with input variables cost
+       curves, and an arbitrary example of an original input and its
        reconstruction.
 """
 import sys
@@ -20,7 +20,6 @@ import argparse
 import theano
 import theano.tensor as T
 from theano.tensor.shared_randomstreams import RandomStreams
-#from dA import dA
 from scipy.misc import comb
 from scipy.spatial.distance import pdist
 from scipy.spatial.distance import squareform
@@ -303,7 +302,7 @@ class deepAE(object):
                 input = self.cA_layers[-1].get_hidden_values(
                     self.cA_layers[-1].x)
                 n_visible = self.hidden_layers_sizes[i - 1]
-
+            print(self.pt_bs)
             cA_layer = cA(numpy_rng=self.numpy_rng,
                           input=input,
                           n_visible=n_visible,
@@ -317,16 +316,16 @@ class deepAE(object):
             self.params[i*2] = theano.shared(
                 self.cA_layers[i].W.eval(), name='W', borrow=False)
             self.params[i*2 + 1] = theano.shared(
-                self.cA_layers[i].b.evsal(), name='b', borrow=False)
+                self.cA_layers[i].b.eval(), name='b', borrow=False)
             self.params[2*self.n_layers - 2 - 2*i] = theano.shared(
                 self.cA_layers[self.n_layers - 1 - i
-                               ].W_prime.eval(), 
+                               ].W_prime.eval(),
                 name='W', borrow=False)
             self.params[2*self.n_layers - 1 - 2*i] = theano.shared(
                 self.cA_layers[self.n_layers - 1 - i
-                               ].b_prime.eval(), 
+                               ].b_prime.eval(),
                 name='b', borrow=False)
-            
+
     def init_sigmoid_layers(self):
         for i in xrange(self.n_layers):
             if i == 0:
@@ -390,9 +389,9 @@ class deepAE(object):
                                                 learning_rate)
             # compile the theano function
             fn = theano.function(inputs=[index,
-                                         theano.Param(contraction_level, 
+                                         theano.Param(contraction_level,
                                                       default=0.1),
-                                         theano.Param(learning_rate, 
+                                         theano.Param(learning_rate,
                                                       default=0.1)],
                                  outputs=cost,
                                  updates=updates,
@@ -605,7 +604,7 @@ class deepAE(object):
 
     def reconstruct_input(self, ix):
     	"""
-    	Use this function to reconstruct the input from an example in the test 
+    	Use this function to reconstruct the input from an example in the test
         set before the model has been saved. If using a reconstructed model and
         arbitrary data, use reconstruct_input_ext
     	"""
@@ -621,11 +620,11 @@ class deepAE(object):
 
     def reconstruct_input_ext(self, model_in):
     	"""
-    	Perform an autoencoding reconstruction given an arbitrary input. No 
-        error checking is performed. The variable model_in must be a theano 
-        shared tensor having the same number of variables ast the data that 
-        was used to train the model. Multiple observations may be given. The 
-        data should have observations along the rows and variables along the 
+    	Perform an autoencoding reconstruction given an arbitrary input. No
+        error checking is performed. The variable model_in must be a theano
+        shared tensor having the same number of variables ast the data that
+        was used to train the model. Multiple observations may be given. The
+        data should have observations along the rows and variables along the
         columns.
     	"""
         y = []
@@ -650,7 +649,7 @@ def test_model(debug=False, path=None, **kwargs):
     model.set_train_vars(datasets=datasets, ft_epochs=100, pt_bs=model.pt_bs)
     model.pretrain()
     model.init_params()
-    model.intit_sigmoid_layers()
+    model.init_sigmoid_layers()
     model.finetune()
     p = wrap_model_params(model)
     i = 100
@@ -694,8 +693,8 @@ def rebuild(data, mult=None):
 
 def plot_orig_recon(model, orig, recon):
     """
-    Plot the saved original and reconstructed data saved during model 
-    training. WARNING: The number of variables has been hard-coded. Edit this 
+    Plot the saved original and reconstructed data saved during model
+    training. WARNING: The number of variables has been hard-coded. Edit this
     code as necessary.
     """
     pyplot.clf()
@@ -734,10 +733,10 @@ def plot_training(model, pt_costs, ft_costs):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Build and test deep autoencoder for semantic hashing.')
-    parser.add_argument('hidden_layers_sizes', nargs='*', type=int, 
+    parser.add_argument('hidden_layers_sizes', nargs='*', type=int,
                         help='a list  of the hidden layer sizes separates '+\
                             'by spaces. Ex: 2048 512 512 8')
-    parser.add_argument('-o', dest='outpath', 
+    parser.add_argument('-o', dest='outpath',
                         help='the directory where the model should be '+\
                             'stored. The name of the file will be '+\
                             'outpath/l1_l2_l3.model.npy where l1 l2 l3 are '+\
