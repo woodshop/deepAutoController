@@ -4,6 +4,9 @@ Use this code as a guide for extracting a dataset of CQFT features.
 import bregman
 from scipy import io
 import numpy as np
+import tables
+from pylearn2.utils.string_utils import preprocess
+from pylearn2.datasets import dense_design_matrix
 
 class Batch():
     def __init__(self, data_dir=None):
