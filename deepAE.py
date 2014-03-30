@@ -214,7 +214,7 @@ class ReconstructFromModel(object):
             plt.savefig(fn)
             plt.close()
 
-    def synth_audio(self, fn_base, inv_orig=False):
+    def synth_audio(self, fn_base=None, inv_orig=False):
         if inv_orig:
             self.F.inverse()
             x_hat = self.F.x_hat
@@ -224,8 +224,10 @@ class ReconstructFromModel(object):
         self.F.inverse(X_hat=self.recon)
         x_hat = self.F.x_hat
         x_hat /= np.abs(x_hat).max()
-        bregman.sound.wavwrite(x_hat, fn_base+"_recon.wav",
-                               self.F.feature_params['sample_rate'])
+        if fn_base is not None:
+            bregman.sound.wavwrite(x_hat, fn_base+"_recon.wav",
+                                   self.F.feature_params['sample_rate'])
+        return x_hat
 
 def test_deepAE(name,
                 path='/home/asarroff/projects/deepAutoController/scripts'):

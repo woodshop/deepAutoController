@@ -1,3 +1,4 @@
+
 """
     Use a Korg nonoKONTROL2 to control the weights of a n autoencoder. Given
     a learned model. The Korg attaches to the input of the center (topmost
@@ -23,20 +24,26 @@ import numpy as np
 import sys
 from matplotlib import pyplot
 import os
+import cPickle
 
 NNEURONS = 8
 BUF = 1024
 os.environ['SDL_VIDEO_WINDOW_POS'] = "0,400"
 class Autocontrol(object):
-    def __init__(self, modelFile, audioFile, plot=False):
+    def __init__(self, model_file, wav_file):
+        self.R = deepAE.REconstructFromModel(model_file)
+        self.R.compute_stft_features(wav_file)
+        self.midi_init()
+
+    def old__init__(self, modelFile, audioFile, plot=False):
         self.recon = None
         self.plotting = plot
         self.modelFile = modelFile
         self.audioFile = audioFile
-        self.mult = theano.shared(value=np.ones(NNEURONS,
-                                             dtype=theano.config.floatX),
-                               borrow=True)
-        self.model = deepAE.rebuild(modelFile, self.mult)
+        #self.mult = theano.shared(value=np.ones(NNEURONS,
+        #                                     dtype=theano.config.floatX),
+        #                       borrow=True)
+        self.R = deepAE.ReconstructFromModel(modelFile)
         # HARD CODED: USE 5 seconds of audio file starting at 1.0 secs
         # WARNING: assumes 22050 sr. Duration of clip will vary based upon
         # actual sr
