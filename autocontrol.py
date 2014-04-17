@@ -224,19 +224,16 @@ class PlayStreaming(object):
     def __init__(self, nfft, wfft, nhop, wav_file, queue, model_file):
         self.nfft = nfft
         self.wfft = wfft
-        self.nbufs = wfft / nhop
         self.nhop = nhop
+        self.nolap = self.nfft-self.nhop
         self.wav_file = wav_file
         self.queue = queue
         self.model_file = model_file
         self.init_model()
 
-        #self.win = np.hanning(self.wfft)
-        #self.win = np.hamming(self.wfft)
-        #self.win = np.ones(self.wfft) 
-
-        self.buf = np.zeros(self.wfft)
-        self.olap_buf = np.zeros(self.wfft-self.nhop)
+        self.win = np.hanning(self.wfft)
+        self.buf = np.zeros(self.nhop)
+        self.olap_buf = np.zeros(self.nolap)
         self.wf = wave.open(wav_file, 'rb')
         self.p = pyaudio.PyAudio()
         self.is_processing = 0
@@ -245,8 +242,13 @@ class PlayStreaming(object):
         format = self.p.get_format_from_width(self.wf.getsampwidth())
         self.stream = self.p.open(rate=rate,
                              channels=channels,
-                             format=format, 
-                             output=True)
+                             format=format,
+                             input=False,
+                             output=True,
+                             input_device_index=None,
+                             output_device_index=None,
+                             frames_per_buffer=self.nhop,
+                             start=True)
         self.playing = False
         self.run()
 
@@ -278,37 +280,35 @@ class PlayStreaming(object):
         self.model = model
 
     def play_frame(self):
-        # Note: I have not been able to get COLA windowing correct,
-        # don't know why.x
         wf = self.wf
         nfft = self.nfft
         wfft = self.wfft
         nhop = self.nhop
-        nolap = wfft - nhop
-        ix = wf.tell()
+        nolap = self.nolap
+        ix  = wf.tell()
         data = wf.readframes(wfft)
         if len(data) < 2*wfft:
             self.wf.rewind()
             self.playing = False
             return
-        data = struct.unpack("h"*wfft, data)
         wf.setpos(ix+nhop)
+        data = np.array(struct.unpack("h"*wfft, data)) * self.win
         fft = np.fft.rfft(data, nfft) / nfft
         X = np.abs(fft)
         phase = np.angle(fft)
         if self.is_processing:
             X = self.process_frame(X)
-        ifft = np.real(nfft * np.fft.irfft(X * np.exp(1j * phase)))[:wfft]
-        self.buf[:] = 0
-        self.buf[:] += ifft
-        self.buf[:nolap] += self.olap_buf
-        self.olap_buf = self.buf[nhop:].copy()
+        data = np.real(nfft * np.fft.irfft(X * np.exp(1j * phase)))
+        self.buf[:] = data[:nhop]
+        self.buf += self.olap_buf[:nhop]
+        self.olap_buf = np.r_[self.olap_buf[nhop:], np.zeros(nhop)]
+        self.olap_buf += data[nhop:]
+
+
         self.buf = np.where(self.buf > np.iinfo('short').max, 
                             np.iinfo('short').max, self.buf)
         self.buf = np.where(self.buf < np.iinfo('short').min, 
                             np.iinfo('short').min, self.buf)
-        data = struct.pack("h"*wfft, *self.buf)
-        return data
 
     def process_frame(self, X):
         for p in self.params:
@@ -316,7 +316,8 @@ class PlayStreaming(object):
         X *= self.mult
         for p in self.params[::-1]:
             X = self.activation(X, p['Wprime'], p['vb'], p['act_dec'])
-        # Need to record the normalization constant of the training set
+        # This is a hack. Need to record the normalization constant of the 
+        # training set
         X *= 70
         return X
 
@@ -333,13 +334,11 @@ class PlayStreaming(object):
 
     def play_stream(self):
         self.playing = True
-        i = 0
         while self.playing:
+            self.play_frame()
+            data = struct.pack("h"*(self.nhop), *self.buf)
+            self.stream.write(data, self.nhop)
             self.cmd_parse()
-            i = (i + 1) % self.nbufs
-            data = self.play_frame()
-            if i == 0 and data is not None:
-                self.stream.write(data)
 
     def run(self):
         while True:
@@ -387,7 +386,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     Q = multiprocessing.Queue()
-    P = multiprocessing.Process(target=PlayStreaming, args=(2048, 1024, 1024, 
+    P = multiprocessing.Process(target=PlayStreaming, args=(2048, 1025, 512, 
                                                             args.audioFile, Q,
                                                             args.modelFile))
     P.start()
