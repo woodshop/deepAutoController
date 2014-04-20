@@ -30,22 +30,17 @@ import cPickle
 
 NEURONS_PER_BANK = 8
 MID_BUF = 1024
-#CHUNK = 2048
-#OLAP = 1536
-#NBUFS = CHUNK / (CHUNK - OLAP) # 4
 
 os.environ['SDL_VIDEO_WINDOW_POS'] = "0,400"
 class Autocontrol(object):
-    def __init__(self, model_file, wav_file, Q, plot=False, linear=False):
-    	self.model_file = model_file
-    	self.wav_file = wav_file
+    def __init__(self, Q):
         self.queue = Q
         while True:
-            cmd,msg = self.queue.get(True) if not self.queue.empty() else ['',None]
+            cmd,msg = self.queue.get(True) if not self.queue.empty(
+                ) else ['',None]
             if cmd == 'nneurons':
                 self.nneurons = msg
                 break
-        #self.plotting = plot
         self.nbanks = int(np.ceil(self.nneurons/8.))
         self.curbank = 0
         self.gain = np.ones(self.nneurons)
@@ -208,25 +203,13 @@ class Autocontrol(object):
         self.queue.put(['shutdown', None])
         self.running = False
 
-    ### NOT CHECKED
-    ### MOVE TO OTHER CLASS
-    def plot(self):
-        pyplot.clf()
-        pyplot.subplot(2,1,1)
-        features.feature_plot(self.R.F.X, dbscale=True, nofig=True, 
-                              title_string="Orig")
-        if hasattr(self.R.F, 'X_hat'):
-            pyplot.subplot(2,1,2)
-            features.feature_plot(np.abs(self.R.F.X_hat), dbscale=True, nofig=True, 
-                                  title_string="Recon")
-
 class PlayStreaming(object):
-    def __init__(self, nfft, wfft, nhop, wav_file, queue, model_file):
+    def __init__(self, nfft, wfft, nhop, wav_file, model_file, normFile, 
+                 queue):
         self.nfft = nfft
         self.wfft = wfft
         self.nhop = nhop
         self.nolap = self.nfft-self.nhop
-        self.wav_file = wav_file
         self.queue = queue
         self.model_file = model_file
         self.init_model()
@@ -234,21 +217,37 @@ class PlayStreaming(object):
         self.win = np.hanning(self.wfft)
         self.buf = np.zeros(self.nhop)
         self.olap_buf = np.zeros(self.nolap)
-        self.wf = wave.open(wav_file, 'rb')
         self.p = pyaudio.PyAudio()
         self.is_processing = 0
-        rate = self.wf.getframerate()
-        channels = self.wf.getnchannels()
-        format = self.p.get_format_from_width(self.wf.getsampwidth())
-        self.stream = self.p.open(rate=rate,
-                             channels=channels,
-                             format=format,
-                             input=False,
-                             output=True,
-                             input_device_index=None,
-                             output_device_index=None,
-                             frames_per_buffer=self.nhop,
-                             start=True)
+        if wav_file == "m":
+            self.source = "input"
+            self.nhop = 1024
+            self.stream = self.p.open(rate=22050,
+                                      channels=2,
+                                      format=8,
+                                      input=True,
+                                      output=True,
+                                      input_device_index=None,
+                                      output_device_index=None,
+                                      frames_per_buffer=self.nhop,
+                                      start=True)
+        else:
+            self.source = "file"
+            self.wav_file = wav_file
+            self.wf = wave.open(wav_file, 'rb')
+            rate = self.wf.getframerate()
+            channels = self.wf.getnchannels()
+            format = self.p.get_format_from_width(self.wf.getsampwidth())
+            self.stream = self.p.open(rate=rate,
+                                      channels=channels,
+                                      format=format,
+                                      input=False,
+                                      output=True,
+                                      input_device_index=None,
+                                      output_device_index=None,
+                                      frames_per_buffer=self.nhop,
+                                      start=True)
+        self.norm = np.load(normFile)
         self.playing = False
         self.run()
 
@@ -280,20 +279,23 @@ class PlayStreaming(object):
         self.model = model
 
     def play_frame(self):
-        wf = self.wf
         nfft = self.nfft
         wfft = self.wfft
         nhop = self.nhop
         nolap = self.nolap
-        ix  = wf.tell()
-        data = wf.readframes(wfft)
-        if len(data) < 2*wfft:
-            self.wf.rewind()
-            self.playing = False
-            return
-        wf.setpos(ix+nhop)
-        data = np.array(struct.unpack("h"*wfft, data)) * self.win
-        fft = np.fft.rfft(data, nfft) / nfft
+        if self.source == "file":
+            wf = self.wf
+            ix  = wf.tell()
+            data = wf.readframes(wfft)
+            if len(data) < 2*wfft:
+                self.wf.rewind()
+                self.playing = False
+                return
+            wf.setpos(ix+nhop)
+            data = np.array(struct.unpack("h"*wfft, data)) / 32768.
+        else:
+            data = self.stream.read(self.nhop)
+        fft = np.fft.rfft(data * (self.win), nfft) / nfft
         X = np.abs(fft)
         phase = np.angle(fft)
         if self.is_processing:
@@ -303,22 +305,17 @@ class PlayStreaming(object):
         self.buf += self.olap_buf[:nhop]
         self.olap_buf = np.r_[self.olap_buf[nhop:], np.zeros(nhop)]
         self.olap_buf += data[nhop:]
-
-
-        self.buf = np.where(self.buf > np.iinfo('short').max, 
-                            np.iinfo('short').max, self.buf)
-        self.buf = np.where(self.buf < np.iinfo('short').min, 
-                            np.iinfo('short').min, self.buf)
+        self.buf = np.where(self.buf > 1.0, 1.0, self.buf)
+        self.buf = np.where(self.buf < -1.0, -1.0, self.buf)
 
     def process_frame(self, X):
+        X /= self.norm
         for p in self.params:
             X = self.activation(X, p['W'], p['hb'], p['act_enc'])
         X *= self.mult
         for p in self.params[::-1]:
             X = self.activation(X, p['Wprime'], p['vb'], p['act_dec'])
-        # This is a hack. Need to record the normalization constant of the 
-        # training set
-        X *= 70
+        X *= self.norm
         return X
 
     @staticmethod
@@ -336,7 +333,9 @@ class PlayStreaming(object):
         self.playing = True
         while self.playing:
             self.play_frame()
-            data = struct.pack("h"*(self.nhop), *self.buf)
+            data = self.buf * 32767
+            #print(data.max())
+            data = struct.pack("h"*(self.nhop), *data)
             self.stream.write(data, self.nhop)
             self.cmd_parse()
 
@@ -373,23 +372,29 @@ class PlayStreaming(object):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Use a MIDI controller to inspect the code layer of a '+ \
-            'deep autoencoder. '+\
-            'Command: python autocontrol.py modelFile audioFile [--plot] '+\
+        description='Use a MIDI controller to play the code layer of a '+ \
+            '[deep] autoencoder. '+\
+            'Command: python autocontrol.py modelFile audioFile [norFile] '+\
             'where modelfile is the filename of the model saved by using '+\
-            'deepAE.py audioFile is a')
+            'deepAE.py audioFile is a wav file and normFile is a numpy file'+\
+            ' storing array of normalozation coefficients')
     parser.add_argument('modelFile', type=str,
                         help="a deep autoencoder trained with deepAE.py")
     parser.add_argument('audioFile', type=str,
-                        help="an audio file to resynthesize")
-    parser.add_argument('--plot', action='store_true')
+                        help="an audio file to resynthesize or -m to use"+
+                        " your computer's input")
+    parser.add_argument('normFile', type=str,
+                        help="a numpy file storing the normalization "+
+                        "coefficients")
     args = parser.parse_args()
 
     Q = multiprocessing.Queue()
     P = multiprocessing.Process(target=PlayStreaming, args=(2048, 1025, 512, 
-                                                            args.audioFile, Q,
-                                                            args.modelFile))
+                                                            args.audioFile,
+                                                            args.modelFile, 
+                                                            args.normFile, 
+                                                            Q))
     P.start()
-    A = Autocontrol(args.modelFile, args.audioFile, Q, plot=args.plot)
+    A = Autocontrol(Q)
     A.run()
     sys.exit(0)
