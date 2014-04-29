@@ -27,9 +27,14 @@ import multiprocessing
 import pyaudio
 import struct
 import cPickle
+import warnings
 
 NEURONS_PER_BANK = 8
 MID_BUF = 1024
+####  The following variables are hard-coded:
+SAMPLE_RATE = 22050
+INPUT_SPACE = 1025
+NFFT = 2048
 
 os.environ['SDL_VIDEO_WINDOW_POS'] = "0,400"
 class Autocontrol(object):
@@ -55,13 +60,13 @@ class Autocontrol(object):
     def midi_init(self):
         pygame.midi.init()
         devcount = pygame.midi.get_count()
-        print('Num of midi devices connected: {0}'.format(devcount))
+        #print('Num of midi devices connected: {0}'.format(devcount))
         for i in range(devcount):
             dev = pygame.midi.get_device_info(i)
             if (dev[1].split()[0] == 'nanoKONTROL2' and
                 dev[1].split()[-1] == 'SLIDER/KNOB'):
                 self.devid = i
-                print("Using {0}".format(dev[1]))
+                #print("Using {0}".format(dev[1]))
                 self.cont =  pygame.midi.Input(self.devid)
 
     def start_screen(self):
@@ -195,59 +200,66 @@ class Autocontrol(object):
 
     def stop(self):
         self.queue.put(["stop", None])
-        pyplot.close()
 
     def exit(self):
-        pyplot.close()
         pygame.quit()
         self.queue.put(['shutdown', None])
         self.running = False
 
 class PlayStreaming(object):
     def __init__(self, nfft, wfft, nhop, wav_file, model_file, normFile, 
-                 queue):
+                 vocoder, queue):
         self.nfft = nfft
         self.wfft = wfft
         self.nhop = nhop
         self.nolap = self.nfft-self.nhop
-        self.queue = queue
-        self.model_file = model_file
-        self.init_model()
-
         self.win = np.hanning(self.wfft)
         self.buf = np.zeros(self.nhop)
         self.olap_buf = np.zeros(self.nolap)
+
+        self.queue = queue
+
+        self.model_file = model_file
+        self.init_model()
+
         self.p = pyaudio.PyAudio()
         self.is_processing = 0
-        if wav_file == "m":
-            self.source = "input"
-            self.nhop = 1024
-            self.stream = self.p.open(rate=22050,
-                                      channels=2,
-                                      format=8,
-                                      input=True,
-                                      output=True,
-                                      input_device_index=None,
-                                      output_device_index=None,
-                                      frames_per_buffer=self.nhop,
-                                      start=True)
-        else:
+        if wav_file is not None:
             self.source = "file"
             self.wav_file = wav_file
             self.wf = wave.open(wav_file, 'rb')
             rate = self.wf.getframerate()
+            if rate != SAMPLE_RATE:
+                warnings.warn("The audio file sample rate does not match the"+
+                        "sample_rate of the models (22050)")
             channels = self.wf.getnchannels()
+            assert(channels==1)
             format = self.p.get_format_from_width(self.wf.getsampwidth())
-            self.stream = self.p.open(rate=rate,
-                                      channels=channels,
-                                      format=format,
-                                      input=False,
-                                      output=True,
-                                      input_device_index=None,
-                                      output_device_index=None,
-                                      frames_per_buffer=self.nhop,
-                                      start=True)
-        self.norm = np.load(normFile)
+            input = False
+        else:
+            self.source = "line_in"
+            rate = SAMPLE_RATE
+            channels = 1
+            format = pyaudio.paInt16
+            input = True
+            self.m_buff = np.zeros(self.wfft)            
+        self.stream = self.p.open(rate=rate,
+                                  channels=channels,
+                                  format=format,
+                                  input=input,
+                                  output=True,
+                                  frames_per_buffer=self.nhop,
+                                  start=False)
+        if normFile is not None:
+            self.norm = np.load(normFile)
+        else:
+            self.norm = np.ones(INPUT_SPACE)
+        if vocoder:
+            ratio = float(wfft)/nhop
+            self.dphi = (2*np.pi * nhop * ratio * np.arange(self.nfft/2+1)
+                         ) / self.nfft
+            self.A = np.zeros(self.nfft/2+1)
+        self.vocoder = vocoder
         self.playing = False
         self.run()
 
@@ -276,9 +288,10 @@ class PlayStreaming(object):
             nneurons = model.nhid
         self.params = params
         self.queue.put(['nneurons',nneurons], False)
+        self.nneurons = nneurons
         self.model = model
 
-    def play_frame(self):
+    def play_frame(self, start=False):
         nfft = self.nfft
         wfft = self.wfft
         nhop = self.nhop
@@ -289,18 +302,28 @@ class PlayStreaming(object):
             data = wf.readframes(wfft)
             if len(data) < 2*wfft:
                 self.wf.rewind()
-                self.playing = False
                 return
             wf.setpos(ix+nhop)
             data = np.array(struct.unpack("h"*wfft, data)) / 32768.
         else:
-            data = self.stream.read(self.nhop)
+            self.m_buff = np.roll(self.m_buff, -nhop)
+            data = self.stream.read(nhop)
+            data = np.array(struct.unpack("h"*nhop, data)) / 32768.
+            self.m_buff[nhop:] = data
+            data = self.m_buff
         fft = np.fft.rfft(data * (self.win), nfft) / nfft
         X = np.abs(fft)
         phase = np.angle(fft)
+        if self.vocoder:
+            if start:
+                self.A = phase
+            self.A += self.dphi
         if self.is_processing:
             X = self.process_frame(X)
+            if self.vocoder:
+                phase = self.A
         data = np.real(nfft * np.fft.irfft(X * np.exp(1j * phase)))
+
         self.buf[:] = data[:nhop]
         self.buf += self.olap_buf[:nhop]
         self.olap_buf = np.r_[self.olap_buf[nhop:], np.zeros(nhop)]
@@ -331,10 +354,11 @@ class PlayStreaming(object):
 
     def play_stream(self):
         self.playing = True
+        start = True
         while self.playing:
-            self.play_frame()
+            self.play_frame(start)
+            start = False
             data = self.buf * 32767
-            #print(data.max())
             data = struct.pack("h"*(self.nhop), *data)
             self.stream.write(data, self.nhop)
             self.cmd_parse()
@@ -350,11 +374,15 @@ class PlayStreaming(object):
             pass
         if cmd == "play_pause":
             if self.playing:
+                self.stream.stop_stream()
                 self.playing = False
             else:
+                self.stream.start_stream()
                 self.play_stream()
         if cmd == "stop":
-            self.wf.rewind()
+            self.stream.stop_stream()
+            if self.source is "file":
+                self.wf.rewind()
             self.playing = False
         if cmd == "shutdown":
             self.shutdown()
@@ -366,33 +394,32 @@ class PlayStreaming(object):
     def shutdown(self):
         self.stream.stop_stream()
         self.stream.close()
-        self.wf.close()
+        if self.source is "file":
+            self.wf.close()
         self.p.terminate()
         exit(0)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='Use a MIDI controller to play the code layer of a '+ \
-            '[deep] autoencoder. '+\
-            'Command: python autocontrol.py modelFile audioFile [norFile] '+\
-            'where modelfile is the filename of the model saved by using '+\
-            'deepAE.py audioFile is a wav file and normFile is a numpy file'+\
-            ' storing array of normalozation coefficients')
-    parser.add_argument('modelFile', type=str,
-                        help="a deep autoencoder trained with deepAE.py")
-    parser.add_argument('audioFile', type=str,
-                        help="an audio file to resynthesize or -m to use"+
-                        " your computer's input")
-    parser.add_argument('normFile', type=str,
-                        help="a numpy file storing the normalization "+
-                        "coefficients")
+    parser = argparse.ArgumentParser(description='Use a MIDI controller to '+
+                                     'play the code layer of a [deep] '+
+                                     'autoencoder.')
+    parser.add_argument('modelfile',  help="a [deep] autoencoder trained with"+
+                        " deepAE.py")
+    parser.add_argument('-a', '--audiofile', help="an audio file to "+
+                        "resynthesize or -m to use your computer's input. If "+
+                        "none is specified the program uses the default input"+
+                        " device.")
+    parser.add_argument('-n', '--normfile', help="a numpy file storing "+
+                        "normalization coefficients")
+    parser.add_argument('-v', '--vocoder', action='store_true', default=False, 
+                        help="channel voder if this flag set")
     args = parser.parse_args()
-
     Q = multiprocessing.Queue()
-    P = multiprocessing.Process(target=PlayStreaming, args=(2048, 1025, 512, 
-                                                            args.audioFile,
-                                                            args.modelFile, 
-                                                            args.normFile, 
+    P = multiprocessing.Process(target=PlayStreaming, args=(NFFT, 1024, 512, 
+                                                            args.audiofile,
+                                                            args.modelfile, 
+                                                            args.normfile, 
+                                                            args.vocoder,
                                                             Q))
     P.start()
     A = Autocontrol(Q)
