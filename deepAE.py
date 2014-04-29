@@ -1,11 +1,13 @@
 import matplotlib
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from pylearn2.datasets import dense_design_matrix
 from pylearn2.utils import serial
 from pylearn2.utils.string_utils import preprocess 
 from pylearn2.config import yaml_parse
+from pylearn2.costs.autoencoder import *
+
 import sys
 import os
 import cPickle
@@ -42,6 +44,28 @@ class sevdig8000(dense_design_matrix.DenseDesignMatrix):
                                        fit_preprocessor=False)
         assert not np.any(np.isnan(self.X))
 
+class sevdig8000FFT(dense_design_matrix.DenseDesignMatrix):
+    """
+    Loads FFT frames. Data was loaded from 7Dig8000_all.h5.
+    """
+    def __init__(self, which_set):
+        assert which_set in ['tra', 'val', 'tes']
+        rng = [1978, 9, 7]
+        path = preprocess("${PYLEARN2_DATA_PATH}/deepAE/data/maxvec.npy")
+        m = np.load(path)
+        path = preprocess("${PYLEARN2_DATA_PATH}/deepAE/data/"+
+                          which_set+".npy")
+        X = np.load(path).item()['X'].astype('float32')
+        X /= m
+        m,r = X.shape
+        topo_view = X.reshape(m,r,1,1)
+        super(sevdig8000FFT, self).__init__(X=X, topo_view=topo_view, y=None,
+                                       view_converter=None,
+                                       axes=['b', 0, 1, 'c'],
+                                       rng=rng, preprocessor=None,
+                                       fit_preprocessor=False)
+        assert not np.any(np.isnan(self.X))
+
 class sevdig8000H5(dense_design_matrix.DenseDesignMatrixPyTables):
     """
     Some docs here
@@ -54,6 +78,34 @@ class sevdig8000H5(dense_design_matrix.DenseDesignMatrixPyTables):
         super(sevdig8000H5, self).__init__(X=data.X, topo_view=None, y=None,
                                            view_converter=None, axes=None,
                                            rng=rng)
+
+class L1(DefaultDataSpecsMixin, Cost):
+    """
+    Class for computing the L1 regularization penalty on the activation
+    of the hidden layer. Should encourage sparse activation.
+    """
+    def expr(self, model, data, ** kwargs):
+        self.get_data_specs(model)[0].validate(data)
+        X = data
+        cost = theano.tensor.abs_(model.encode(X)).sum(axis=1).mean()
+        return cost
+
+class CE(DefaultDataSpecsMixin, Cost):
+    """
+    Class for computing CE regularization penalty on the activation
+    of the hidden layer. Should encourage sparse activation.
+    """
+    def __init__(self, rho):
+        self.rho = rho
+
+    def expr(self, model, data, ** kwargs):
+        self.get_data_specs(model)[0].validate(data)
+        X = data
+        rho = self.rho
+        rho_hat = model.encode(X).mean(axis=0)
+        cost = (rho*(tensor.log(rho)-tensor.log(rho_hat)) + 
+                (1-rho)*(tensor.log(1-rho)-tensor.log(1-rho_hat))).sum()
+        return cost
 
 def gen_tables_subset(h5_path, how_many, save_path, seed=9778):
     tables.file._open_files.close_all()                                          
@@ -82,7 +134,45 @@ def gen_tables_subset(h5_path, how_many, save_path, seed=9778):
     h5file.flush()
     h5file.close()
     source.close()
-    
+
+def gen_data_from_table(h5_path, save_path, seed=9778):
+    tables.file._open_files.close_all()
+    source_f = tables.open_file(h5_path, 'r')
+    source = source_f.get_node("/", "Data")
+    nr = source.X.nrows
+    _,nc = source.X.chunkshape
+    np.random.seed(seed)
+    n_tra = 50000
+    n_val = 10000
+    n_tes = 10000
+    n = n_tra + n_val + n_tes
+    indexes = np.random.permutation(xrange(nr))[:n]
+
+    print("Building training set.")
+    with open(save_path+'/tra.npy', 'w') as f:
+        data = {'ix' : indexes[:n_tra], 'X' : np.empty((n_tra, nc), dtype='float32')}
+        for i,ix in enumerate(indexes[:n_tra]):
+            print("\t{0}".format(float(i)/n_tra))
+            data['X'][i] = source.X[ix]
+        np.save(f, data)
+
+    print("Building validation set.")
+    with open(save_path+'/val.npy', 'w') as f:
+        data = {'ix' : indexes[n_tra:n_tra+n_val], 'X' : np.empty((n_val, nc), 
+                                                                  dtype='float32')}
+        for i,ix in enumerate(indexes[n_tra:n_tra+n_val]):
+            print("\t{0}".format(float(i)/n_val))
+            data['X'][i] = source.X[ix]
+        np.save(f, data)
+
+    print("Building testing set.")
+    with open(save_path+'/tes.npy', 'w') as f:
+        data = {'ix' : indexes[-n_val:], 'X' : np.empty((n_tes, nc), dtype='float32')}
+        for i,ix in enumerate(indexes[-n_val:]):
+            print("\t{0}".format(float(i)/n_tes))
+            data['X'][i] = source.X[ix]
+        np.save(f, data)
+    source_f.close()
 
 def gen_tables_all_stat(data_base=
                         '/global/data/casey/sarroff/projects/groove/data', 
@@ -229,17 +319,22 @@ class ReconstructFromModel(object):
                                    self.F.feature_params['sample_rate'])
         return x_hat
 
-def test_deepAE(name,
-                path='/home/asarroff/projects/deepAutoController/scripts'):
-    script_path = path+'/'+name+'.yaml'
+def test_deepAE(argv, path='/home/asarroff/projects/deepAutoController/scripts'):
+    SCRIPT = sys.argv[1]
+    NHID = int(sys.argv[2])
+
+    script_path = path+'/'+SCRIPT+'.yaml'
     print("Running "+script_path)
     f = open(script_path, 'r')
     yaml = f.read()
     f.close()
-    yaml = yaml % ({'script': name})
+    
+    inputs = {'SCRIPT' : SCRIPT,
+              'NHID' : NHID}
+    
+    yaml = yaml % (inputs)
     train = yaml_parse.load(yaml)
     train.main_loop()
 
 if __name__ == '__main__':
-    script = sys.argv[1]
-    test_deepAE(script)
+    test_deepAE(sys.argv)
