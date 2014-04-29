@@ -25,6 +25,7 @@ class NNSAE(Autoencoder):
                  lrateIP=0.001, meanIP=0.2):
         super(NNSAE, self).__init__(nvis, nhid, act_enc, act_dec, tied_weights,
                                     irange, rng)
+
         self.lrateRO = lrateRO
         self.regRO = regRO
         self.decayP = decayP
@@ -40,6 +41,21 @@ class NNSAE(Autoencoder):
             self._params.append(self.act_enc.b)
             self.logistic_a = self.act_enc.a
             self.logistic_b = self.act_enc.b
+
+    def _hidden_input(self, x):
+        return T.dot(x, self.weights)
+
+    def decode(self, hiddens):
+        if self.act_dec is None:
+            act_dec = lambda x: x
+        else:
+            act_dec = self.act_dec
+        if isinstance(hiddens, T.Variable):
+            return act_dec(T.dot(hiddens, self.w_prime))
+        else:
+            return [self.decode(v) for v in hiddens]
+
+
 
     def get_lr_scalers(self):
         rval = OrderedDict()
@@ -113,7 +129,15 @@ class NNSAEMSE(MeanSquaredReconstructionError):
         rval = OrderedDict()
         rval['lrate'] = model.lrate
         return rval
-
+    
+    def get_gradients(self, model, data, **kwargs):
+        cost = self.expr(model=model, data=data, **kwargs)
+        params = list(model.get_params())
+        grads = T.grad(cost, params, disconnected_inputs='ignore')
+        gradients = OrderedDict(izip(params, grads))
+        updates = OrderedDict()
+        return gradients, updates
+        
 class NNSAEWeightDecay(object):
     def __init__(self, model):
         updates = OrderedDict()
@@ -142,7 +166,7 @@ class NNSAEScaledLogisticSparsity(DefaultDataSpecsMixin, Cost):
         updates = OrderedDict()
         return gradients, updates
 
-    def get_monitoring_channels(self, model, data, **kwargs):
+    def get_monitoring_channels_DNU(self, model, data, **kwargs):
         self.get_data_specs(model)[0].validate(data)
         rval = OrderedDict()
         for p in model.get_params():
