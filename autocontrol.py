@@ -28,6 +28,7 @@ import pyaudio
 import struct
 import cPickle
 import warnings
+import nnsae
 
 NEURONS_PER_BANK = 8
 MID_BUF = 1024
@@ -270,8 +271,12 @@ class PlayStreaming(object):
         if hasattr(model, "autoencoders"):
             for a in model.autoencoders:
                 params.append({})
-                params[-1]['act_enc'] = a.act_enc.name if hasattr(
-                    model.autoencoders[0].act_enc, 'name') else None
+                if hasattr(model.act_enc, 'name'):
+                    params[-1]['act_enc'] = model.act_enc.name
+                elif type(model.act_enc) is nnsae.ScaledLogistic:
+                    params[-1]['act_enc'] = 'ScaledLogistic'
+                else:
+                    params[-1]['act_enc'] = None
                 params[-1]['act_dec'] = a.act_dec.name if hasattr(
                     model.autoencoders[0].act_dec, 'name') else None
                 for p in a.get_params():
@@ -279,14 +284,22 @@ class PlayStreaming(object):
             nneurons = model.autoencoders[-1].get_output_space().dim
         else:
             params.append({})
-            params[-1]['act_enc'] = model.act_enc.name if hasattr(
-                model.act_enc, 'name') else None
+            # Extremely hacky, fix:
+            if hasattr(model.act_enc, 'name'):
+                params[-1]['act_enc'] = model.act_enc.name
+            elif type(model.act_enc) is nnsae.ScaledLogistic:
+                params[-1]['act_enc'] = 'ScaledLogistic'
+            else:
+                params[-1]['act_enc'] = None
             params[-1]['act_dec'] = model.act_dec.name if hasattr(
                 model.act_dec, 'name') else None
             for p in model.get_params():
                 params[0][p.name] = p.get_value()
             nneurons = model.nhid
         self.params = params
+        for params in self.params:
+            if 'Wprime' not in params:
+                params['Wprime'] = params['W'].T
         self.queue.put(['nneurons',nneurons], False)
         self.nneurons = nneurons
         self.model = model
@@ -334,7 +347,14 @@ class PlayStreaming(object):
     def process_frame(self, X):
         X /= self.norm
         for p in self.params:
-            X = self.activation(X, p['W'], p['hb'], p['act_enc'])
+            if p['act_enc'] is 'ScaledLogistic':
+                a = p['logistic_a']
+                b = p['logistic_b']
+            else:
+                a = 1
+                b = 0
+            X = self.activation(X, p['W'], p['hb'], p['act_enc'], logistic_a=a,
+                                logistic_b=b)
         X *= self.mult
         for p in self.params[::-1]:
             X = self.activation(X, p['Wprime'], p['vb'], p['act_dec'])
@@ -342,15 +362,19 @@ class PlayStreaming(object):
         return X
 
     @staticmethod
-    def activation(X, W, b, a):
+    def activation(X, W, b, a, **kwargs):
         X = np.dot(X, W) + b
         if a is not None:
-            X = getattr(PlayStreaming, a)(X)
+            X = getattr(PlayStreaming, a)(X, **kwargs)
         return X
         
     @staticmethod
-    def sigmoid(x):
+    def sigmoid(x, **kwargs):
         return 1 / (1 + np.exp(-x))
+
+    @staticmethod
+    def ScaledLogistic(x, logistic_a=1, logistic_b=0):
+        return 1 / (1 + np.exp(-1*logistic_a*x-logistic_b))
 
     def play_stream(self):
         self.playing = True
