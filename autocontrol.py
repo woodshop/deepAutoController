@@ -214,7 +214,7 @@ class PlayStreaming(object):
         self.wfft = wfft
         self.nhop = nhop
         self.nolap = self.nfft-self.nhop
-        self.win = np.hanning(self.wfft)
+        self.win = np.hanning(self.wfft+1)[:-1]
         self.buf = np.zeros(self.nhop)
         self.olap_buf = np.zeros(self.nolap)
 
@@ -256,10 +256,7 @@ class PlayStreaming(object):
         else:
             self.norm = np.ones(INPUT_SPACE)
         if vocoder:
-            ratio = float(wfft)/nhop
-            self.dphi = (2*np.pi * nhop * ratio * np.arange(self.nfft/2+1)
-                         ) / self.nfft
-            self.A = np.zeros(self.nfft/2+1)
+            self.dphi = (2*np.pi * nhop * np.arange(self.nfft/2+1)) / self.nfft
         self.vocoder = vocoder
         self.playing = False
         self.run()
@@ -322,21 +319,18 @@ class PlayStreaming(object):
             self.m_buff = np.roll(self.m_buff, -nhop)
             data = self.stream.read(nhop)
             data = np.array(struct.unpack("h"*nhop, data)) / 32768.
-            self.m_buff[nhop:] = data
+            self.m_buff[-nhop:] = data
             data = self.m_buff
-        fft = np.fft.rfft(data * (self.win), nfft) / nfft
+        fft = np.fft.rfft(data * self.win, nfft) / nfft
         X = np.abs(fft)
-        phase = np.angle(fft)
         if self.vocoder:
-            if start:
-                self.A = phase
-            self.A += self.dphi
+            phase = self.dphi
+        else:
+            phase = np.angle(fft)
         if self.is_processing:
             X = self.process_frame(X)
-            if self.vocoder:
-                phase = self.A
         data = np.real(nfft * np.fft.irfft(X * np.exp(1j * phase)))
-
+        data[:wfft] *= (self.win * 2 / 3)
         self.buf[:] = data[:nhop]
         self.buf += self.olap_buf[:nhop]
         self.olap_buf = np.r_[self.olap_buf[nhop:], np.zeros(nhop)]
@@ -439,7 +433,7 @@ if __name__ == '__main__':
                         help="channel voder if this flag set")
     args = parser.parse_args()
     Q = multiprocessing.Queue()
-    P = multiprocessing.Process(target=PlayStreaming, args=(NFFT, 1024, 512, 
+    P = multiprocessing.Process(target=PlayStreaming, args=(NFFT, NFFT, 512, 
                                                             args.audiofile,
                                                             args.modelfile, 
                                                             args.normfile, 
