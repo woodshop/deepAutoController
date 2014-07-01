@@ -342,25 +342,13 @@ class PlayStreaming(object):
         self.preprocess.apply(self.ds)
         X = self.ds.X
         for p in self.params:
-            if p['act_enc'] is 'ScaledLogistic':
-                a = p['logistic_a']
-                b = p['logistic_b']
-            else:
-                a = 1
-                b = 0
-            X = self.activation(X, p['W'], p['hb'], p['act_enc'], logistic_a=a,
-                                logistic_b=b)
+            X = self.activation(X, p['W'], p['hb'], p['act_enc'])
         X *= self.mult
         for p in self.params[::-1]:
             X = self.activation(X, p['Wprime'], p['vb'], p['act_dec'])
-        try:
-            self.ds.X = X
-            self.preprocess.invert(self.ds)
-            X = self.ds.X[0]
-        except Exception:
-            # This is here since I changed the Normalize object and I'd like 
-            # to handle old models
-            X = (X * self.preprocess._max)[0]    
+        self.ds.X = X
+        self.preprocess.invert(self.ds)
+        X = self.ds.X[0]
         return X
 
     @staticmethod
