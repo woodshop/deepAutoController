@@ -16,7 +16,7 @@ class NNSAE(Autoencoder):
     Inherits the Autoencoder class but makes a few key changes:
     * Weights are initialized in nonnegative range [0, 0.05]
     * Weights are tied by default
-    * Adds the ScaledLogistic paramters if necessary
+    * Adds the ScaledLogistic paramaters if necessary
     """
     def __init__(self, nvis, nhid, act_enc, act_dec, 
                  tied_weights=True, irange=0.05, rng=9001,
@@ -42,10 +42,10 @@ class NNSAE(Autoencoder):
             self.logistic_a = self.act_enc.a
             self.logistic_b = self.act_enc.b
 
-    def _hidden_input(self, x):
+    def DNU__hidden_input(self, x):
         return T.dot(x, self.weights)
 
-    def decode(self, hiddens):
+    def DNU_decode(self, hiddens):
         if self.act_dec is None:
             act_dec = lambda x: x
         else:
@@ -54,8 +54,6 @@ class NNSAE(Autoencoder):
             return act_dec(T.dot(hiddens, self.w_prime))
         else:
             return [self.decode(v) for v in hiddens]
-
-
 
     def get_lr_scalers(self):
         rval = OrderedDict()
@@ -113,7 +111,6 @@ class ScaledLogistic(object):
     def __call__(self, x):
         return 1/(1+T.exp(-1*self.a*x-self.b))
 
-
 class NNSAEMSE(MeanSquaredReconstructionError):
     def get_fixed_var_descr(self, model, data):
         self.get_data_specs(model)[0].validate(data)
@@ -142,7 +139,8 @@ class NNSAEWeightDecay(object):
     def __init__(self, model):
         updates = OrderedDict()
         for p in model.get_params():
-            if p.name in ['W', 'Wprime']:
+            # if p.name in ['W', 'Wprime']:
+            if p.name in ['W', 'Wprime', 'hb', 'vb']:
                 updates[p] = p - T.where(p < 0, p * model.decayN, 
                                          p * model.decayP)
         self.decay = function([], updates=updates)
@@ -166,7 +164,7 @@ class NNSAEScaledLogisticSparsity(DefaultDataSpecsMixin, Cost):
         updates = OrderedDict()
         return gradients, updates
 
-    def get_monitoring_channels_DNU(self, model, data, **kwargs):
+    def DNU_get_monitoring_channels(self, model, data, **kwargs):
         self.get_data_specs(model)[0].validate(data)
         rval = OrderedDict()
         for p in model.get_params():

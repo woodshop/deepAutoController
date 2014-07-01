@@ -1,5 +1,4 @@
 import matplotlib
-#matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from pylearn2.datasets import dense_design_matrix
@@ -15,6 +14,7 @@ import bregman
 import theano
 import random
 import tables
+import h5py
 
 class sevdig8000(dense_design_matrix.DenseDesignMatrix):
     """
@@ -57,6 +57,8 @@ class sevdig8000FFT(dense_design_matrix.DenseDesignMatrix):
                           which_set+".npy")
         X = np.load(path).item()['X'].astype('float32')
         X /= m
+        #X -= X.min()
+        #X /= X.max()
         m,r = X.shape
         topo_view = X.reshape(m,r,1,1)
         super(sevdig8000FFT, self).__init__(X=X, topo_view=topo_view, y=None,
@@ -79,6 +81,16 @@ class sevdig8000H5(dense_design_matrix.DenseDesignMatrixPyTables):
                                            view_converter=None, axes=None,
                                            rng=rng)
 
+class HDF5(dense_design_matrix.DenseDesignMatrixPyTables):
+    def __init__(self, fn):
+        rng = [1978, 9, 7]
+        path = "${PYLEARN2_DATA_PATH}/deepAE/data/"+fn
+        self.h5file = h5py.File(preprocess(path), 'r')
+        data = self.h5file['data']
+        super(HDF5, self).__init__(X=data, topo_view=None, y=None,
+                                   view_converter=None, axes=None,
+                                   rng=rng)
+        
 class L1(DefaultDataSpecsMixin, Cost):
     """
     Class for computing the L1 regularization penalty on the activation
@@ -108,12 +120,13 @@ class CE(DefaultDataSpecsMixin, Cost):
         return cost
 
 def gen_tables_subset(h5_path, how_many, save_path, seed=9778):
-    tables.file._open_files.close_all()                                          
+    tables.file._open_files.close_all()
     source = tables.open_file(h5_path, 'r')
     data = source.get_node('/', "Data")
     nr,nc = data.X.shape
     h5file = tables.open_file(save_path, mode="w", 
-                             title="7Didgital Framed Decomposed Dataset Subset")
+                             title=
+                              "7Didgital Framed Decomposed Dataset Subset")
     gcolumns = h5file.createGroup(h5file.root, "Data", "Data")
     atom = tables.Float32Atom()
     filters = tables.Filters(complib='blosc', complevel=5)
@@ -150,7 +163,8 @@ def gen_data_from_table(h5_path, save_path, seed=9778):
 
     print("Building training set.")
     with open(save_path+'/tra.npy', 'w') as f:
-        data = {'ix' : indexes[:n_tra], 'X' : np.empty((n_tra, nc), dtype='float32')}
+        data = {'ix' : indexes[:n_tra], 
+                'X' : np.empty((n_tra, nc), dtype='float32')}
         for i,ix in enumerate(indexes[:n_tra]):
             print("\t{0}".format(float(i)/n_tra))
             data['X'][i] = source.X[ix]
@@ -158,8 +172,8 @@ def gen_data_from_table(h5_path, save_path, seed=9778):
 
     print("Building validation set.")
     with open(save_path+'/val.npy', 'w') as f:
-        data = {'ix' : indexes[n_tra:n_tra+n_val], 'X' : np.empty((n_val, nc), 
-                                                                  dtype='float32')}
+        data = {'ix' : indexes[n_tra:n_tra+n_val], 
+                'X' : np.empty((n_val, nc), dtype='float32')}
         for i,ix in enumerate(indexes[n_tra:n_tra+n_val]):
             print("\t{0}".format(float(i)/n_val))
             data['X'][i] = source.X[ix]
@@ -167,7 +181,8 @@ def gen_data_from_table(h5_path, save_path, seed=9778):
 
     print("Building testing set.")
     with open(save_path+'/tes.npy', 'w') as f:
-        data = {'ix' : indexes[-n_val:], 'X' : np.empty((n_tes, nc), dtype='float32')}
+        data = {'ix' : indexes[-n_val:], 
+                'X' : np.empty((n_tes, nc), dtype='float32')}
         for i,ix in enumerate(indexes[-n_val:]):
             print("\t{0}".format(float(i)/n_tes))
             data['X'][i] = source.X[ix]
@@ -319,9 +334,11 @@ class ReconstructFromModel(object):
                                    self.F.feature_params['sample_rate'])
         return x_hat
 
-def test_deepAE(argv, path='/home/asarroff/projects/deepAutoController/scripts'):
+def test_deepAE(argv, 
+                path='/home/asarroff/projects/deepAutoController/scripts'):
     SCRIPT = sys.argv[1]
-    NHID = int(sys.argv[2])
+    #NHID = int(sys.argv[2])
+    #STD = float(sys.argv[3])
 
     script_path = path+'/'+SCRIPT+'.yaml'
     print("Running "+script_path)
@@ -329,10 +346,11 @@ def test_deepAE(argv, path='/home/asarroff/projects/deepAutoController/scripts')
     yaml = f.read()
     f.close()
     
-    inputs = {'SCRIPT' : SCRIPT,
-              'NHID' : NHID}
-    
-    yaml = yaml % (inputs)
+    #inputs = {'SCRIPT' : SCRIPT,
+    #          'NHID' : NHID,
+    #          'STD' : STD}
+    #
+    #yaml = yaml % (inputs)
     train = yaml_parse.load(yaml)
     train.main_loop()
 
