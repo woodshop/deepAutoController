@@ -101,6 +101,13 @@ class Normalize(Preprocessor):
         new = X / self._max
         dataset.set_design_matrix(new)
         
+    def invert(self, dataset):
+        X = dataset.get_design_matrix()
+        if self._max is None:
+            raise ValueError("cNormalize object has no stored max")
+        new = X * self._max
+        dataset.set_design_matrix(new)
+    
 
 def populate_autoencoder_yaml(args, n_layers, nvis):
     autoencoder_template = """!obj:icmc.ICMC {
