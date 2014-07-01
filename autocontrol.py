@@ -210,13 +210,13 @@ class PlayStreaming(object):
         # resynthesis using the window processing I've selected we should have
         # nhop = 1/4 wfft = 1/2 nfft
         with open(feature_file, 'r') as f:
-            p = cPickle.load(f)
-            self.nfft = p['nfft']
-            #self.wfft = p['wfft']
+            feat = cPickle.load(f)
+            self.nfft = feat['nfft']
+            #self.wfft = feat['wfft']
             self.wfft = self.nfft / 2
-            #self.nhop = p['nhop']
+            #self.nhop = feat['nhop']
             self.nhop = self.wfft / 4
-            self.sample_rate = p['sample_rate']
+            self.sample_rate = feat['sample_rate']
         self.nolap = self.nfft-self.nhop
         self.win = np.hanning(self.wfft+1)[:-1]
         self.buf = np.zeros(self.nhop)
@@ -245,7 +245,7 @@ class PlayStreaming(object):
             channels = 1
             format = pyaudio.paInt16
             input = True
-            self.m_buff = np.zeros(self.wfft)            
+            self.m_buff = np.zeros(self.wfft)
         self.stream = self.p.open(rate=self.sample_rate,
                                   channels=channels,
                                   format=format,
@@ -256,7 +256,8 @@ class PlayStreaming(object):
         with open(preprocess_file, 'r') as f:
             self.preprocess = cPickle.load(f)
         if vocoder:
-            self.dphi = (2*np.pi * nhop * np.arange(self.nfft/2+1)) / self.nfft
+            self.dphi = (2*np.pi * self.nhop * 
+                         np.arange(self.nfft/2+1)) / self.nfft
         self.vocoder = vocoder
         self.playing = False
         self.run()
@@ -280,7 +281,7 @@ class PlayStreaming(object):
                 params[-1]['act_dec'] = 'linear'
             elif hasattr(m.act_dec, 'name') and m.act_dec.name == 'sigmoid':
                 params[-1]['act_dec'] = 'sigmoid'
-            elif hasattr((m.act_dec, 'func_name') and 
+            elif (hasattr(m.act_dec, 'func_name') and 
                          m.act_dec.func_name == 'relu'):
                 params[-1]['act_dec'] = 'relu'
             else:
