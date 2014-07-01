@@ -49,7 +49,7 @@ if __name__ == "__main__":
         print("Unrecognized feature configuration")
         exit(1)
     base = '/scratch/sarroff/feat/'+which
-    with open(base+'/params.pkl', 'w') as fid:
+    with open(base+'/'+which+'_params.pkl', 'w') as fid:
         cPickle.dump(p, fid, -1)
     base = '/scratch/sarroff/feat/'+which+'/items'
     fnames = glob.glob('/scratch/sarroff/wav/*.wav')
