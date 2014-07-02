@@ -47,7 +47,7 @@ class AsymWeightDecay(ModelExtension):
     def post_modify_updates(self, updates):
         update_weights = ['W', 'Wprime']
         for k,v in updates.items():
-            if k in update_weights:
+            if k.name in update_weights:
                 updates[k] = v - theano.tensor.where(v < 0, v * self.decayN, 
                                                      v * self.decayP)
 class L1(DefaultDataSpecsMixin, Cost):
@@ -198,8 +198,8 @@ if __name__ == "__main__":
     parser.add_argument('save-directory', help="Location to save model")
     parser.add_argument('save-prefix', help="Prefix for model name")
     parser.add_argument('yaml-template', help="Location of template")
-    parser.add_argument('feature', 
-                        choices=['stft', 'cqft_3bpo', 'cqft_12bpo', 'stft_orig'],
+    parser.add_argument('feature', choices=['stft', 'cqft_3bpo', 
+                                            'cqft_12bpo', 'stft_orig'],
                         help="Which low level feature to use")
     parser.add_argument('learning-rate', type=float,
                         help="The initial global learning rate")
@@ -243,7 +243,8 @@ if __name__ == "__main__":
             assert len(v) == n_layers
                 
     yaml = populate_yaml(args, n_layers)
-    with open(args['save-directory']+'/'+args['save-prefix']+'.yaml', 'w') as f:
+    with open(args['save-directory']+'/'+args['save-prefix']+'.yaml', 
+              'w') as f:
         f.write(yaml)
     train = yaml_parse.load(yaml)
     train.main_loop()
