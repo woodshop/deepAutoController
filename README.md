@@ -28,6 +28,18 @@ http://www.korg.com/nanoseries2
 
 This code has only been tested on a Mac having OS 10.8.4 using pythnon 2.7.5
 
+Note: I've had problems with IOError: [Errno Input overflowed] -9981
+updating to the newest pyaudio version fixed the problem Unfortunately, brew does not link to the newest version. to fix, do this:
+brew rm portaudio
+brew edit portaudio
+replace the stable section with:
+  stable do
+    url 'http://www.portaudio.com/archives/pa_stable_v19_20140130.tgz'
+    sha1 '526a7955de59016a06680ac24209ecb6ce05527d'
+  end
+brew install portaudio
+
+
 ## Files
 ### autocontrol.py
 

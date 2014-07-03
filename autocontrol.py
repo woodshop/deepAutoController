@@ -1,6 +1,6 @@
 
 """
-    Use a Korg nonoKONTROL2 to control the weights of a n autoencoder. Given
+    Use a Korg nonoKONTROL2 to control the weights of an autoencoder. Given
     a learned model. The Korg attaches to the input of the center (topmost
     encoding layer). The faders of the Korg may be used to multiply the
     incoming weights. Use the faders as a multiplier, use the knobs to change
@@ -16,12 +16,12 @@ import argparse
 import pygame
 import pygame.midi
 import theano
-from pylearn2.utils import sharedX
 import numpy as np
 from matplotlib import pyplot
 import os
 import sys
 from pylearn2.utils import sharedX
+from pylearn2.datasets.dense_design_matrix import DenseDesignMatrix
 import wave
 import multiprocessing
 import pyaudio
@@ -32,10 +32,6 @@ import nnsae
 
 NEURONS_PER_BANK = 8
 MID_BUF = 1024
-####  The following variables are hard-coded:
-SAMPLE_RATE = 22050
-INPUT_SPACE = 1025
-NFFT = 2048
 
 os.environ['SDL_VIDEO_WINDOW_POS'] = "0,400"
 class Autocontrol(object):
@@ -208,11 +204,19 @@ class Autocontrol(object):
         self.running = False
 
 class PlayStreaming(object):
-    def __init__(self, nfft, wfft, nhop, wav_file, model_file, normFile, 
+    def __init__(self, model_file, feature_file, preprocess_file, wav_file, 
                  vocoder, queue):
-        self.nfft = nfft
-        self.wfft = wfft
-        self.nhop = nhop
+        # The following feature vars are hard-coded in. For clean
+        # resynthesis using the window processing I've selected we should have
+        # nhop = 1/4 wfft = 1/2 nfft
+        with open(feature_file, 'r') as f:
+            feat = cPickle.load(f)
+            self.nfft = feat['nfft']
+            #self.wfft = feat['wfft']
+            self.wfft = self.nfft / 2
+            #self.nhop = feat['nhop']
+            self.nhop = self.wfft / 4
+            self.sample_rate = feat['sample_rate']
         self.nolap = self.nfft-self.nhop
         self.win = np.hanning(self.wfft+1)[:-1]
         self.buf = np.zeros(self.nhop)
@@ -229,34 +233,31 @@ class PlayStreaming(object):
             self.source = "file"
             self.wav_file = wav_file
             self.wf = wave.open(wav_file, 'rb')
-            rate = self.wf.getframerate()
-            if rate != SAMPLE_RATE:
+            if self.wf.getframerate() != self.sample_rate:
                 warnings.warn("The audio file sample rate does not match the"+
-                        "sample_rate of the models (22050)")
+                        "sample_rate of the models")
             channels = self.wf.getnchannels()
             assert(channels==1)
             format = self.p.get_format_from_width(self.wf.getsampwidth())
             input = False
         else:
             self.source = "line_in"
-            rate = SAMPLE_RATE
             channels = 1
             format = pyaudio.paInt16
             input = True
-            self.m_buff = np.zeros(self.wfft)            
-        self.stream = self.p.open(rate=rate,
+            self.m_buff = np.zeros(self.wfft)
+        self.stream = self.p.open(rate=self.sample_rate,
                                   channels=channels,
                                   format=format,
                                   input=input,
                                   output=True,
                                   frames_per_buffer=self.nhop,
                                   start=False)
-        if normFile is not None:
-            self.norm = np.load(normFile)
-        else:
-            self.norm = np.ones(INPUT_SPACE)
+        with open(preprocess_file, 'r') as f:
+            self.preprocess = cPickle.load(f)
         if vocoder:
-            self.dphi = (2*np.pi * nhop * np.arange(self.nfft/2+1)) / self.nfft
+            self.dphi = (2*np.pi * self.nhop * 
+                         np.arange(self.nfft/2+1)) / self.nfft
         self.vocoder = vocoder
         self.playing = False
         self.run()
@@ -265,41 +266,40 @@ class PlayStreaming(object):
         with open(self.model_file, 'r') as f:
             model = cPickle.load(f)
         params = []
-        if hasattr(model, "autoencoders"):
-            for a in model.autoencoders:
-                params.append({})
-                if hasattr(model.act_enc, 'name'):
-                    params[-1]['act_enc'] = model.act_enc.name
-                elif type(model.act_enc) is nnsae.ScaledLogistic:
-                    params[-1]['act_enc'] = 'ScaledLogistic'
-                else:
-                    params[-1]['act_enc'] = None
-                params[-1]['act_dec'] = a.act_dec.name if hasattr(
-                    model.autoencoders[0].act_dec, 'name') else None
-                for p in a.get_params():
-                    params[-1][p.name] = p.get_value()
-            nneurons = model.autoencoders[-1].get_output_space().dim
-        else:
+        for m in model.autoencoders:
             params.append({})
-            # Extremely hacky, fix:
-            if hasattr(model.act_enc, 'name'):
-                params[-1]['act_enc'] = model.act_enc.name
-            elif type(model.act_enc) is nnsae.ScaledLogistic:
-                params[-1]['act_enc'] = 'ScaledLogistic'
+            if m.act_enc is None:
+                params[-1]['act_enc'] = 'linear'
+            elif hasattr(m.act_enc, 'name') and m.act_enc.name == 'sigmoid':
+                params[-1]['act_enc'] = 'sigmoid'
+            elif (hasattr(m.act_enc, 'func_name') and 
+                  m.act_enc.func_name == 'relu'):
+                params[-1]['act_enc'] = 'relu'
             else:
-                params[-1]['act_enc'] = None
-            params[-1]['act_dec'] = model.act_dec.name if hasattr(
-                model.act_dec, 'name') else None
-            for p in model.get_params():
-                params[0][p.name] = p.get_value()
-            nneurons = model.nhid
+                raise RuntimeError("Model has unknown encoding function.")
+            if m.act_dec is None:
+                params[-1]['act_dec'] = 'linear'
+            elif hasattr(m.act_dec, 'name') and m.act_dec.name == 'sigmoid':
+                params[-1]['act_dec'] = 'sigmoid'
+            elif (hasattr(m.act_dec, 'func_name') and 
+                         m.act_dec.func_name == 'relu'):
+                params[-1]['act_dec'] = 'relu'
+            else:
+                raise RuntimeError("Model has unknown decoding function.")
+            for p in m.get_params():
+                params[-1][p.name] = p.get_value()
+        input_space = model.autoencoders[0].get_input_space().dim
+        nneurons = model.autoencoders[-1].get_output_space().dim
         self.params = params
         for params in self.params:
             if 'Wprime' not in params:
                 params['Wprime'] = params['W'].T
         self.queue.put(['nneurons',nneurons], False)
+        self.input_space = input_space
         self.nneurons = nneurons
         self.model = model
+        # Need this instance for proeprocessing data
+        self.ds = DenseDesignMatrix(X=np.zeros((1, input_space)))
 
     def play_frame(self, start=False):
         nfft = self.nfft
@@ -339,20 +339,17 @@ class PlayStreaming(object):
         self.buf = np.where(self.buf < -1.0, -1.0, self.buf)
 
     def process_frame(self, X):
-        X /= self.norm
+        self.ds.X = np.atleast_2d(X)
+        self.preprocess.apply(self.ds)
+        X = self.ds.X
         for p in self.params:
-            if p['act_enc'] is 'ScaledLogistic':
-                a = p['logistic_a']
-                b = p['logistic_b']
-            else:
-                a = 1
-                b = 0
-            X = self.activation(X, p['W'], p['hb'], p['act_enc'], logistic_a=a,
-                                logistic_b=b)
+            X = self.activation(X, p['W'], p['hb'], p['act_enc'])
         X *= self.mult
         for p in self.params[::-1]:
             X = self.activation(X, p['Wprime'], p['vb'], p['act_dec'])
-        X *= self.norm
+        self.ds.X = X
+        self.preprocess.invert(self.ds)
+        X = self.ds.X[0]
         return X
 
     @staticmethod
@@ -361,14 +358,18 @@ class PlayStreaming(object):
         if a is not None:
             X = getattr(PlayStreaming, a)(X, **kwargs)
         return X
-        
+     
+    @staticmethod
+    def linear(x, **kwargs):
+        return x
+
     @staticmethod
     def sigmoid(x, **kwargs):
         return 1 / (1 + np.exp(-x))
 
     @staticmethod
-    def ScaledLogistic(x, logistic_a=1, logistic_b=0):
-        return 1 / (1 + np.exp(-1*logistic_a*x-logistic_b))
+    def relu(x, **kwargs):
+        return np.where(x > 0, x, 0)
 
     def play_stream(self):
         self.playing = True
@@ -421,24 +422,29 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Use a MIDI controller to '+
                                      'play the code layer of a [deep] '+
                                      'autoencoder.')
-    parser.add_argument('modelfile',  help="a [deep] autoencoder trained with"+
-                        " deepAE.py")
+    parser.add_argument('modelfile', help="a pickled deep composed "+
+                        "autoencoder trained with deepAE.py")
+    parser.add_argument('featurefile', help="a pickled feature params"+
+                        "file storing a dict of the params used to generate "+
+                        "the low level features")
+    parser.add_argument('preprocessfile', help="a pickled file "+
+                        "storing a pylearn2 preprocessor subclass instance")
     parser.add_argument('-a', '--audiofile', help="an audio file to "+
                         "resynthesize or -m to use your computer's input. If "+
                         "none is specified the program uses the default input"+
                         " device.")
-    parser.add_argument('-n', '--normfile', help="a numpy file storing "+
-                        "normalization coefficients")
     parser.add_argument('-v', '--vocoder', action='store_true', default=False, 
                         help="channel voder if this flag set")
     args = parser.parse_args()
+ 
     Q = multiprocessing.Queue()
-    P = multiprocessing.Process(target=PlayStreaming, args=(NFFT, NFFT, 512, 
-                                                            args.audiofile,
-                                                            args.modelfile, 
-                                                            args.normfile, 
-                                                            args.vocoder,
-                                                            Q))
+    P = multiprocessing.Process(target=PlayStreaming, 
+                                args=(args.modelfile,
+                                      args.featurefile,
+                                      args.preprocessfile, 
+                                      args.audiofile,
+                                      args.vocoder,
+                                      Q))
     P.start()
     A = Autocontrol(Q)
     A.run()
