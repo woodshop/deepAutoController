@@ -1,3 +1,4 @@
+import numpy as np
 import argparse
 import theano.tensor
 import h5py
@@ -9,7 +10,7 @@ from pylearn2.costs.cost import DefaultDataSpecsMixin
 from pylearn2.utils import safe_zip
 from pylearn2.config import yaml_parse
 from pylearn2.datasets.preprocessing import Preprocessor
-
+from pylearn2.datasets.preprocessing import Pipeline
 
 class ICMC(DenoisingAutoencoder):
     """
@@ -40,12 +41,14 @@ class AsymWeightDecay(ModelExtension):
     This extension allows an assymetrical weight decay. It is called after the
     updates are computed.
     """
-    def __init__(self, decayP=0, decayN=1):
+    def __init__(self, decayP=0, decayN=1, decay_bias=False):
         self.__dict__.update(locals())
         del self.self
         
     def post_modify_updates(self, updates):
         update_weights = ['W', 'Wprime']
+        if self.decay_bias:
+            update_weights.extend(['vb', 'hb'])
         for k,v in updates.items():
             if k.name in update_weights:
                 updates[k] = v - theano.tensor.where(v < 0, v * self.decayN, 
@@ -108,6 +111,30 @@ class Normalize(Preprocessor):
         new = X * self._max
         dataset.set_design_matrix(new)
     
+class LogScale(Preprocessor):
+    def __init__(self):
+        self._max = None
+
+    def apply(self, dataset, can_fit=False):
+        X = dataset.get_design_matrix()
+        if can_fit:
+            self._max = X.max(axis=0)
+        else:
+            if self._max is None:
+                raise ValueError("can_fit is False, but Normalize object "
+                                 "has no stored max")
+        new = np.log10(np.clip(X, 0.0001, self._max))
+        dataset.set_design_matrix(new)
+
+    def invert(self, dataset):
+        X = dataset.get_design_matrix()
+        new = 10 ** X
+        dataset.set_design_matrix(new)
+
+class Pipeline(Pipeline):
+    def invert(self, dataset):
+        for item in self.items:
+            item.invert(dataset)
 
 def populate_autoencoder_yaml(args, n_layers, nvis):
     autoencoder_template = """!obj:icmc.ICMC {
@@ -175,8 +202,7 @@ def populate_yaml(args, n_layers):
     h5file = h5py.File(kwargs['train_fn'], 'r')
     nvis = h5file['data'].shape[1]
     h5file.close()
-    kwargs['preproc_pkl'] = (base+'/feat/'+args['feature']+'/'+
-                             args['feature']+'_preprocessor.pkl')
+    kwargs['preproc_pkl'] = args['preproc-pkl']
     kwargs['test_fn'] = (base+'/feat/'+args['feature']+'/'+
                          args['feature']+'_test.h5')
     kwargs['val_fn'] = (base+'/feat/'+args['feature']+'/'+
@@ -198,6 +224,7 @@ if __name__ == "__main__":
     parser.add_argument('save-directory', help="Location to save model")
     parser.add_argument('save-prefix', help="Prefix for model name")
     parser.add_argument('yaml-template', help="Location of template")
+    parser.add_argument('preproc-pkl', help="Location of pickled preprocessor")
     parser.add_argument('feature', choices=['stft', 'cqft_3bpo', 
                                             'cqft_12bpo', 'stft_orig'],
                         help="Which low level feature to use")
@@ -239,7 +266,7 @@ if __name__ == "__main__":
     n_layers = len(args['units'])
     for k,v in args.items():
         if k not in ['feature', 'learning-rate', 'yaml-template', 
-                     'save-directory', 'save-prefix']:
+                     'save-directory', 'save-prefix', 'preproc-pkl']:
             assert len(v) == n_layers
                 
     yaml = populate_yaml(args, n_layers)
