@@ -15,12 +15,9 @@
 import argparse
 import pygame
 import pygame.midi
-import theano
 import numpy as np
-from matplotlib import pyplot
 import os
 import sys
-from pylearn2.utils import sharedX
 from pylearn2.datasets.dense_design_matrix import DenseDesignMatrix
 import wave
 import multiprocessing
@@ -28,7 +25,6 @@ import pyaudio
 import struct
 import cPickle
 import warnings
-import nnsae
 
 NEURONS_PER_BANK = 8
 MID_BUF = 1024
@@ -120,8 +116,8 @@ class Autocontrol(object):
                     self.change_bank(1)
                 if ctrl == 46 and val == 127: # cycle button
                     self.exit()
-                if ctrl == 60 and val == 127: # set
-                    self.reset_all()
+                if ctrl == 60 and val == 127: # set button 
+                    self.toggle_mute_all()
                 if ctrl == 43  and val == 127: # <<
                     self.toggle_processing()
                 if ctrl == 44  and val == 127: # >>
@@ -132,8 +128,6 @@ class Autocontrol(object):
                     self.play()
                 if ctrl == 45 and val == 127: # record button 
                     self.reset_all()
-                if ctrl == 60 and val == 127: # set button 
-                    self.mute_all()
                 if ctrl >= 0 and ctrl < 8: # faders
                     self.gain[ctrl + NEURONS_PER_BANK*self.curbank
                               ] = val/127.
@@ -165,8 +159,8 @@ class Autocontrol(object):
         self.update_mult()
         self.update_text()
 
-    def mute_all(self):
-        self.mute[:] = 0
+    def toggle_mute_all(self):
+        self.mute = np.where(self.mute == 0, 1, 0)
         self.update_mult()
         self.update_text()
 
@@ -266,6 +260,9 @@ class PlayStreaming(object):
         with open(self.model_file, 'r') as f:
             model = cPickle.load(f)
         params = []
+        # Added for backward compatibility with older models
+        if not hasattr(model, 'autoencoders'):
+            model.autoencoders = [model]
         for m in model.autoencoders:
             params.append({})
             if m.act_enc is None:
