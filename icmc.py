@@ -11,6 +11,7 @@ from pylearn2.utils import safe_zip
 from pylearn2.config import yaml_parse
 from pylearn2.datasets.preprocessing import Preprocessor
 from pylearn2.datasets.preprocessing import Pipeline
+from pylearn2.datasets.preprocessing import Standardize
 
 class ICMC(DenoisingAutoencoder):
     """
@@ -131,9 +132,15 @@ class LogScale(Preprocessor):
         new = 10 ** X
         dataset.set_design_matrix(new)
 
+class Standardize(Standardize):
+    def invert(self, dataset):
+        X = dataset.get_design_matrix()
+        new = X * (self._std_eps + self._std) + self._mean
+        dataset.set_design_matrix(new)
+
 class Pipeline(Pipeline):
     def invert(self, dataset):
-        for item in self.items:
+        for item in self.items[::-1]:
             item.invert(dataset)
 
 def populate_autoencoder_yaml(args, n_layers, nvis):

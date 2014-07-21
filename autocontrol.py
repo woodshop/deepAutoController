@@ -25,6 +25,11 @@ import pyaudio
 import struct
 import cPickle
 import warnings
+from bregman.features_base import Features
+###############
+import types
+import icmc
+import pylearn2.datasets.preprocessing
 
 NEURONS_PER_BANK = 8
 MID_BUF = 1024
@@ -205,11 +210,14 @@ class PlayStreaming(object):
         # nhop = 1/4 wfft = 1/2 nfft
         with open(feature_file, 'r') as f:
             feat = cPickle.load(f)
+            self.feat = feat['feature']
+            if self.feat == 'cqft':
+                self.Q = Features(np.array([]), feat).Q
             self.nfft = feat['nfft']
-            #self.wfft = feat['wfft']
-            self.wfft = self.nfft / 2
-            #self.nhop = feat['nhop']
-            self.nhop = self.wfft / 4
+            self.wfft = feat['wfft']
+            #self.wfft = self.nfft / 2
+            self.nhop = feat['nhop']
+            #self.nhop = self.wfft / 4
             self.sample_rate = feat['sample_rate']
         self.nolap = self.nfft-self.nhop
         self.win = np.hanning(self.wfft+1)[:-1]
@@ -249,9 +257,30 @@ class PlayStreaming(object):
                                   start=False)
         with open(preprocess_file, 'r') as f:
             self.preprocess = cPickle.load(f)
+
+
+        ############## The following patch should be removed ###########
+        if isinstance(self.preprocess, 
+                      pylearn2.datasets.preprocessing.Standardize):
+            self.preprocess.invert = types.MethodType(icmc.Standardize.invert,
+                                                      self.preprocess)
+            self.preprocess.__class__ = icmc.Standardize
+
+        if isinstance(self.preprocess, icmc.Pipeline):
+            self.preprocess.invert = types.MethodType(icmc.Pipeline.invert, 
+                                                      self.preprocess)
+            for item in self.preprocess.items:
+                if isinstance(item, 
+                              pylearn2.datasets.preprocessing.Standardize):
+                    item.invert = types.MethodType(icmc.Standardize.invert,
+                                                   item)
+                    item.__class__ = icmc.Standardize
+        ################################################################
         if vocoder:
-            self.dphi = (2*np.pi * self.nhop * 
+            self.dphi = (2 * np.pi * self.nhop * 
                          np.arange(self.nfft/2+1)) / self.nfft
+            #self.phase = np.zeros(self.nfft/2+1)
+            self.phase = self.dphi
         self.vocoder = vocoder
         self.playing = False
         self.run()
@@ -303,6 +332,7 @@ class PlayStreaming(object):
         wfft = self.wfft
         nhop = self.nhop
         nolap = self.nolap
+        feat = self.feat
         if self.source == "file":
             wf = self.wf
             ix  = wf.tell()
@@ -317,15 +347,24 @@ class PlayStreaming(object):
             data = self.stream.read(nhop)
             data = np.array(struct.unpack("h"*nhop, data)) / 32768.
             self.m_buff[-nhop:] = data
-            data = self.m_buff
+            data = self.m_buff        
         fft = np.fft.rfft(data * self.win, nfft) / nfft
         X = np.abs(fft)
+        if feat == 'cqft':
+            X = np.sqrt(np.dot(self.Q, np.atleast_2d(X).T**2)).flatten()
         if self.vocoder:
-            phase = self.dphi
+            phase = self.phase
+            self.phase += self.dphi
+            #self.phase = self.phase - 2*np.pi*np.round(self.phase/(2*np.pi))
+            self.phase = (self.phase + np.pi) % (2 * np.pi) - np.pi
+            #self.phase = self.phase % (2 * np.pi)
+            #print(phase.shape)
         else:
             phase = np.angle(fft)
         if self.is_processing:
             X = self.process_frame(X)
+        if feat == 'cqft':
+            X = np.dot(self.Q.T, np.atleast_2d(X).T).flatten()
         data = np.real(nfft * np.fft.irfft(X * np.exp(1j * phase)))
         data[:wfft] *= (self.win * 2 / 3)
         self.buf[:] = data[:nhop]
