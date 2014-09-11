@@ -1,0 +1,78 @@
+!obj:pylearn2.train.Train {
+    dataset: &train !obj:pylearn2.datasets.hdf5.HDF5Dataset {
+        filename: %(train_fn)s,
+        X: data,
+        preprocessor: !pkl: %(preproc_pkl)s
+    },
+    model: !obj:pylearn2.models.autoencoder.DeepComposedAutoencoder {
+        autoencoders: %(autoencoders)s
+    },
+    algorithm: !obj:pylearn2.training_algorithms.sgd.SGD {
+        learning_rate: %(learning_rate).3f,
+        cost: !obj:pylearn2.costs.cost.SumOfCosts {
+            costs: [
+              [1.0,
+              !obj:pylearn2.costs.autoencoder.MeanSquaredReconstructionError {
+              }],
+              %(coeffs)s
+            ]
+        },
+        batch_size : 10000,
+        monitoring_batch_size: null,
+        monitoring_dataset : {
+            train: *train,
+            valid: !obj:pylearn2.datasets.hdf5.HDF5Dataset {
+                filename: %(val_fn)s,
+                X: data,
+                preprocessor: !pkl: %(preproc_pkl)s
+            },
+            test: !obj:pylearn2.datasets.hdf5.HDF5Dataset {
+                filename: %(test_fn)s,
+                X: data,
+                preprocessor: !pkl: %(preproc_pkl)s
+            },
+        },
+        monitor_iteration_mode: sequential,
+        termination_criterion: !obj:pylearn2.termination_criteria.Or {
+            criteria: [
+            !obj:pylearn2.termination_criteria.MonitorBased {
+                prop_decrease: 0.001,
+                N: 5,
+                channel_name: valid_objective,
+            },
+            !obj:pylearn2.termination_criteria.EpochCounter {
+                max_epochs: 250
+            }]
+        },
+        update_callbacks: null,
+        learning_rule:
+            !obj:pylearn2.training_algorithms.learning_rule.Momentum {
+            init_momentum: 0.5
+        },
+        set_batch_size: false,
+        train_iteration_mode: batchwise_shuffled_sequential,
+        batches_per_iter: null,
+        theano_function_mode: null,
+        monitoring_costs: null,
+        seed: [1978, 9, 7]
+    },
+    save_path: %(save_path)s,
+    save_freq: 10,
+    extensions: [
+        !obj:pylearn2.train_extensions.best_params.MonitorBasedSaveBest {
+            channel_name: valid_objective,
+            save_path: %(save_path_best)s
+        },
+        !obj:pylearn2.training_algorithms.learning_rule.MomentumAdjustor {
+            final_momentum: .6,
+            start: 1,
+            saturate: 250
+        },
+        !obj:pylearn2.training_algorithms.sgd.LinearDecayOverEpoch {
+            start: 100,
+            saturate: 250,
+            decay_factor: 0.01
+        }
+    ],
+    allow_overwrite: true
+}
