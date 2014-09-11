@@ -12,6 +12,12 @@ from pylearn2.config import yaml_parse
 from pylearn2.datasets.preprocessing import Preprocessor
 from pylearn2.datasets.preprocessing import Pipeline
 from pylearn2.datasets.preprocessing import Standardize
+from pylearn2.datasets.hdf5 import HDF5Dataset, HDF5DatasetIterator
+from pylearn2.datasets.dense_design_matrix import DenseDesignMatrix
+from pylearn2.utils.iteration import safe_izip
+from functools import wraps
+from pylearn2.costs.autoencoder import GSNFriendlyCost
+import types
 
 class ICMC(DenoisingAutoencoder):
     """
@@ -41,6 +47,8 @@ class AsymWeightDecay(ModelExtension):
     """
     This extension allows an assymetrical weight decay. It is called after the
     updates are computed.
+
+    TODO: Consider adding this to the model's censor_updates method instead
     """
     def __init__(self, decayP=0, decayN=1, decay_bias=False):
         self.__dict__.update(locals())
@@ -54,6 +62,7 @@ class AsymWeightDecay(ModelExtension):
             if k.name in update_weights:
                 updates[k] = v - theano.tensor.where(v < 0, v * self.decayN, 
                                                      v * self.decayP)
+
 class L1(DefaultDataSpecsMixin, Cost):
     """
     Class for computing the L1 regularization penalty on the activation
@@ -88,6 +97,18 @@ class L1(DefaultDataSpecsMixin, Cost):
         total_cost.name = 'L1_ActCost'
         assert total_cost.ndim == 0
         return total_cost
+
+class MeanRelativeSquaredReconstructionError(GSNFriendlyCost):
+    """
+    Do not use this class as a learning objective. It is only meant 
+    for comparing already-trained model. The entire test set must be passed to
+    as input to this evaluator.
+    """
+    @staticmethod
+    def cost(a, b):
+        val1 =  ((a - b) ** 2).sum(axis=1)
+        val2 = ((a - a.mean(axis=0)) ** 2).sum(axis=1)
+        return (val1/val2).mean()
 
 class Normalize(Preprocessor):
     def __init__(self, global_max=False):
@@ -143,6 +164,65 @@ class Pipeline(Pipeline):
         for item in self.items[::-1]:
             item.invert(dataset)
 
+# Currently not used because loading from disk onto GPU is too slow
+class HDF5Dataset(HDF5Dataset):
+    def __init__(self, filename, X=None, topo_view=None, y=None,
+                 load_all=False, **kwargs):
+        if 'preprocessor' in kwargs:
+            if ('fit_preprocessor' in kwargs and 
+                kwargs['fit_preprocessor'] is False) or ('fit_preprocessor' 
+                                                         not in kwargs):
+                self._preprocessor = kwargs['preprocessor']
+                kwargs['preprocessor'] = None
+        else:
+            self._preprocessor = None
+        self.load_all = load_all
+        if h5py is None:
+            raise RuntimeError("Could not import h5py.")
+        self._file = h5py.File(filename)
+        if X is not None:
+            X = self.get_dataset(X, load_all)
+        if topo_view is not None:
+            topo_view = self.get_dataset(topo_view, load_all)
+        if y is not None:
+            y = self.get_dataset(y, load_all)
+        DenseDesignMatrix.__init__(self, X=X, topo_view=topo_view, y=y,
+                                   **kwargs)
+
+    def iterator(self, *args, **kwargs):
+        iterator = super(HDF5Dataset, self).iterator(*args, **kwargs)
+        iterator.__class__ = HDF5DatasetIterator
+        iterator._preprocessor = self._preprocessor
+        return iterator
+
+class HDF5DatasetIterator(HDF5DatasetIterator):
+    def next(self):
+        next_index = self._subset_iterator.next()
+
+        # convert to boolean selection
+        sel = np.zeros(self.num_examples, dtype=bool)
+        sel[next_index] = True
+        next_index = sel
+
+        rval = []
+        for data, fn in safe_izip(self._raw_data, self._convert):
+            try:
+                this_data = data[next_index]
+            except TypeError:
+                this_data = data[next_index, :]
+            if fn:
+                this_data = fn(this_data)
+            if self._preprocessor is not None:
+                d = DenseDesignMatrix(X=this_data)
+                self._preprocessor.apply(d)
+                this_data = d.get_design_matrix()
+            assert not np.any(np.isnan(this_data))
+            rval.append(this_data)
+        rval = tuple(rval)
+        if not self._return_tuple and len(rval) == 1:
+            rval, = rval
+        return rval    
+
 def populate_autoencoder_yaml(args, n_layers, nvis):
     autoencoder_template = """!obj:icmc.ICMC {
             extensions: [!obj:icmc.AsymWeightDecay {
@@ -162,10 +242,16 @@ def populate_autoencoder_yaml(args, n_layers, nvis):
             rng: [1978, 9, 7],
         }"""
     autoencoder_yaml = "["
-    coeffs_yaml = "["
+    sparsity = not (all([sp == 0.0 for sp in args['sparsity']]))
+    if sparsity:
+        coeffs_yaml = """[1.0, !obj:icmc.L1 {{
+                   coeffs: ["""
+    else:
+        coeffs_yaml = ""
     yamls = []
     for i in xrange(n_layers):
-        coeffs_yaml += "{0:.3f}"
+        if sparsity:
+            coeffs_yaml += "{0:.3f}"
         if i is not 0:
             nvis = args['units'][i-1]
         tied_weights = ('false' if args['tied_weights'][i] in
@@ -187,13 +273,16 @@ def populate_autoencoder_yaml(args, n_layers, nvis):
                 'tied_weights':tied_weights,
                 'weights_nonnegative':weights_nonnegative,
                 'irange': args['irange'][i]})
-        coeffs_yaml = coeffs_yaml.format(args['sparsity'][i])
+        if sparsity:
+            coeffs_yaml = coeffs_yaml.format(args['sparsity'][i])
         if i != n_layers-1:
             yamls[i] += ", "
-            coeffs_yaml += ", "
+            if sparsity:
+                coeffs_yaml += ", "
     autoencoder_yaml += "".join(yamls)
     autoencoder_yaml += "]"
-    coeffs_yaml += "]"
+    if sparsity:
+        coeffs_yaml += "]}]"
     return autoencoder_yaml,coeffs_yaml
 
 def populate_yaml(args, n_layers):
