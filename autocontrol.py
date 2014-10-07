@@ -205,9 +205,11 @@ class Autocontrol(object):
 class PlayStreaming(object):
     def __init__(self, model_file, feature_file, preprocess_file, wav_file, 
                  vocoder, queue):
-        # The following feature vars are hard-coded in. For clean
-        # resynthesis using the window processing I've selected we should have
-        # nhop = 1/4 wfft = 1/2 nfft
+        # The current models have a front end where there is a rectangular
+        # window applied to the analysis window and a hamming window applied to
+        # the synthesis window. The order should be reversed. The models
+        # were potentially unnecessarily learning to spurious high frequency
+        # content. This will be updated here when the models are updated
         with open(feature_file, 'r') as f:
             feat = cPickle.load(f)
             self.feat = feat['feature']
@@ -215,10 +217,9 @@ class PlayStreaming(object):
                 self.Q = Features(np.array([]), feat).Q
             self.nfft = feat['nfft']
             self.wfft = feat['wfft']
-            #self.wfft = self.nfft / 2
             self.nhop = feat['nhop']
-            #self.nhop = self.wfft / 4
             self.sample_rate = feat['sample_rate']
+            print("{0}\t{1}\t{2}".format(self.nfft,self.wfft,self.nhop))
         self.nolap = self.nfft-self.nhop
         self.win = np.hanning(self.wfft+1)[:-1]
         self.buf = np.zeros(self.nhop)
@@ -259,7 +260,7 @@ class PlayStreaming(object):
             self.preprocess = cPickle.load(f)
 
 
-        ############## The following patch should be removed ###########
+        ##### The following patch should be removed at some point ######
         if isinstance(self.preprocess, 
                       pylearn2.datasets.preprocessing.Standardize):
             self.preprocess.invert = types.MethodType(icmc.Standardize.invert,
@@ -279,8 +280,7 @@ class PlayStreaming(object):
         if vocoder:
             self.dphi = (2 * np.pi * self.nhop * 
                          np.arange(self.nfft/2+1)) / self.nfft
-            #self.phase = np.zeros(self.nfft/2+1)
-            self.phase = self.dphi
+            self.phase = np.random.rand(self.nfft/2+1) * 2 * np.pi - np.pi
         self.vocoder = vocoder
         self.playing = False
         self.run()
@@ -347,16 +347,17 @@ class PlayStreaming(object):
             data = self.stream.read(nhop)
             data = np.array(struct.unpack("h"*nhop, data)) / 32768.
             self.m_buff[-nhop:] = data
-            data = self.m_buff        
-        fft = np.fft.rfft(data * self.win, nfft) / nfft
+            data = self.m_buff
+        #data *= (self.win * 2 / 3)        
+        fft = np.fft.rfft(data, nfft) / nfft
         X = np.abs(fft)
         if feat == 'cqft':
             X = np.sqrt(np.dot(self.Q, np.atleast_2d(X).T**2)).flatten()
         if self.vocoder:
             phase = self.phase
-            self.phase += self.dphi
+            self.phase = (self.phase + np.pi + self.dphi) % (2 * np.pi) - np.pi
             #self.phase = self.phase - 2*np.pi*np.round(self.phase/(2*np.pi))
-            self.phase = (self.phase + np.pi) % (2 * np.pi) - np.pi
+            #self.phase = (self.phase + np.pi) % (2 * np.pi) - np.pi
             #self.phase = self.phase % (2 * np.pi)
             #print(phase.shape)
         else:
