@@ -17,7 +17,7 @@ def extract(arg):
         
 if __name__ == "__main__":
     which = sys.argv[1]
-    p = features.default_feature_params()
+    p = features.Features.default_params()
     if which == 'cqft_3bpo':
         p['feature'] = 'cqft'
         p['nbpo'] = 3
@@ -45,6 +45,16 @@ if __name__ == "__main__":
         p['nfft'] = 2048
         p['wfft'] = 2048
         p['nhop'] = 1024
+    elif which == 'stft2':
+        p['feature'] = 'stft'
+        p['nbpo'] = None
+        p['lo'] = None
+        p['hi'] = None
+        p['sample_rate'] = 22050
+        p['nfft'] = 512
+        p['wfft'] = 256
+        p['nhop'] = 112
+        p['hann_win'] = 'analysis'
     else:
         print("Unrecognized feature configuration")
         exit(1)
