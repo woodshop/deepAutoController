@@ -35,12 +35,14 @@ NEURONS_PER_BANK = 8
 MID_BUF = 1024
 
 os.environ['SDL_VIDEO_WINDOW_POS'] = "0,400"
+
+
 class Autocontrol(object):
     def __init__(self, Q):
         self.queue = Q
         while True:
-            cmd,msg = self.queue.get(True) if not self.queue.empty(
-                ) else ['',None]
+            cmd, msg = self.queue.get(True) if not self.queue.empty(
+                ) else ['', None]
             if cmd == 'nneurons':
                 self.nneurons = msg
                 break
@@ -54,18 +56,18 @@ class Autocontrol(object):
         self.tracks = ['Original', 'Resynthesized']
         self.running = True
         self.start_screen()
-        
+
     def midi_init(self):
         pygame.midi.init()
         devcount = pygame.midi.get_count()
-        #print('Num of midi devices connected: {0}'.format(devcount))
+        # print('Num of midi devices connected: {0}'.format(devcount))
         for i in range(devcount):
             dev = pygame.midi.get_device_info(i)
             if (dev[1].split()[0] == 'nanoKONTROL2' and
                 dev[1].split()[-1] == 'SLIDER/KNOB'):
                 self.devid = i
-                #print("Using {0}".format(dev[1]))
-                self.cont =  pygame.midi.Input(self.devid)
+                # print("Using {0}".format(dev[1]))
+                self.cont = pygame.midi.Input(self.devid)
 
     def start_screen(self):
         self.screen = pygame.display.set_mode([640, 480])
@@ -76,35 +78,35 @@ class Autocontrol(object):
         self.update_text()
 
     def update_text(self):
-        self.screen.fill((0,0,0))
-        text = self.font.render('Neuron',1,(255,255,255))
-        self.screen.blit(text, (20,20))
-        text = self.font.render('Gain',1,(255,255,255))
-        self.screen.blit(text, (230,20))
-        text = self.font.render('Scale',1,(255,255,255))
-        self.screen.blit(text, (320,20))
-        text = self.font.render('Adj. Value',1,(255,255,255))
-        self.screen.blit(text, (420,20))
-        text = self.font.render('Mute',1,(255,255,255))
-        self.screen.blit(text, (520,20))
+        self.screen.fill((0, 0, 0))
+        text = self.font.render('Neuron', 1, (255, 255, 255))
+        self.screen.blit(text, (20, 20))
+        text = self.font.render('Gain', 1, (255, 255, 255))
+        self.screen.blit(text, (230, 20))
+        text = self.font.render('Scale', 1, (255, 255, 255))
+        self.screen.blit(text, (320, 20))
+        text = self.font.render('Adj. Value', 1, (255, 255, 255))
+        self.screen.blit(text, (420, 20))
+        text = self.font.render('Mute', 1, (255, 255, 255))
+        self.screen.blit(text, (520, 20))
         for i in range(NEURONS_PER_BANK):
             n = self.curbank * NEURONS_PER_BANK + i
-            text = self.font.render('{0}'.format(n), 1, (255,255,255))
-            self.screen.blit(text, (20,(i+2)*30))
+            text = self.font.render('{0}'.format(n), 1, (255, 255, 255))
+            self.screen.blit(text, (20, (i+2)*30))
             text = self.font.render("%.5f" % self.gain[n], 1,
-                                    (255,255,255))
-            self.screen.blit(text, (220,(i+2)*30))
-            text = self.font.render("%.5f" % self.scale[n], 1, (255,255,255))
-            self.screen.blit(text, (320,(i+2)*30))
-            text = self.font.render("%.5f" % self.encoded[n], 1, 
-                                    (255,255,255))
-            self.screen.blit(text, (420,(i+2)*30))
-            text = self.font.render("M" if not self.mute[n] else "", 1, 
-                                    (255,255,255))
-            self.screen.blit(text, (520,(i+2)*30))
+                                    (255, 255, 255))
+            self.screen.blit(text, (220, (i+2)*30))
+            text = self.font.render("%.5f" % self.scale[n], 1, (255, 255, 255))
+            self.screen.blit(text, (320, (i+2)*30))
+            text = self.font.render("%.5f" % self.encoded[n], 1,
+                                    (255, 255, 255))
+            self.screen.blit(text, (420, (i+2)*30))
+            text = self.font.render("M" if not self.mute[n] else "", 1,
+                                    (255, 255, 255))
+            self.screen.blit(text, (520, (i+2)*30))
         text = self.font.render('Queued Track: {0}'.format(
-                self.tracks[self.is_processing]), 1, (255,255,255))
-        self.screen.blit(text, (20,(NEURONS_PER_BANK+4)*30))
+                self.tracks[self.is_processing]), 1, (255, 255, 255))
+        self.screen.blit(text, (20, (NEURONS_PER_BANK+4)*30))
         pygame.display.flip()
 
     def run(self):
@@ -114,36 +116,36 @@ class Autocontrol(object):
                 data = self.cont.read(MID_BUF)
                 ctrl = data[-1][0][1]
                 val = data[-1][0][2]
-                #print(ctrl)
-                if ctrl == 58 and val == 127: # Track <
+                # print(ctrl)
+                if ctrl == 58 and val == 127:  # Track <
                     self.change_bank(-1)
-                if ctrl == 59 and val == 127: # Track >
+                if ctrl == 59 and val == 127:  # Track >
                     self.change_bank(1)
-                if ctrl == 46 and val == 127: # cycle button
+                if ctrl == 46 and val == 127:  # cycle button
                     self.exit()
-                if ctrl == 60 and val == 127: # set button 
+                if ctrl == 60 and val == 127:  # set button
                     self.toggle_mute_all()
-                if ctrl == 43  and val == 127: # <<
+                if ctrl == 43 and val == 127:  # <<
                     self.toggle_processing()
-                if ctrl == 44  and val == 127: # >>
+                if ctrl == 44 and val == 127:  # >>
                     self.toggle_processing()
-                if ctrl == 42 and val == 127: # stop button
+                if ctrl == 42 and val == 127:  # stop button
                     self.stop()
-                if ctrl == 41 and val == 127: # play button 
+                if ctrl == 41 and val == 127:  # play button
                     self.play()
-                if ctrl == 45 and val == 127: # record button 
+                if ctrl == 45 and val == 127:  # record button
                     self.reset_all()
-                if ctrl >= 0 and ctrl < 8: # faders
+                if ctrl >= 0 and ctrl < 8:  # faders
                     self.gain[ctrl + NEURONS_PER_BANK*self.curbank
                               ] = val/127.
                     self.update_mult()
-                if ctrl >= 16 and ctrl < 24: # knobs
+                if ctrl >= 16 and ctrl < 24:  # knobs
                     self.scale[ctrl-16 + NEURONS_PER_BANK*self.curbank
                                ] = val/127. * 2
                     self.update_mult()
-                if ctrl >= 48 and ctrl < 56 and val == 127: # fader mute
+                if ctrl >= 48 and ctrl < 56 and val == 127:  # fader mute
                     self.mute_t_neuron(ctrl-48 + NEURONS_PER_BANK*self.curbank)
-                if ctrl >= 64 and ctrl <= 71 and val == 127: # fader record
+                if ctrl >= 64 and ctrl <= 71 and val == 127:  # fader record
                     self.reset_neuron(ctrl-64 + NEURONS_PER_BANK*self.curbank)
 
     def change_bank(self, pos):
@@ -202,8 +204,9 @@ class Autocontrol(object):
         self.queue.put(['shutdown', None])
         self.running = False
 
+
 class PlayStreaming(object):
-    def __init__(self, model_file, feature_file, preprocess_file, wav_file, 
+    def __init__(self, model_file, feature_file, preprocess_file, wav_file,
                  vocoder, queue):
         # The current models have a front end where there is a rectangular
         # window applied to the analysis window and a hamming window applied to
@@ -219,7 +222,7 @@ class PlayStreaming(object):
             self.wfft = feat['wfft']
             self.nhop = feat['nhop']
             self.sample_rate = feat['sample_rate']
-            print("{0}\t{1}\t{2}".format(self.nfft,self.wfft,self.nhop))
+            print("{0}\t{1}\t{2}".format(self.nfft, self.wfft, self.nhop))
         self.nolap = self.nfft-self.nhop
         self.win = np.hanning(self.wfft+1)[:-1]
         self.buf = np.zeros(self.nhop)
@@ -237,10 +240,10 @@ class PlayStreaming(object):
             self.wav_file = wav_file
             self.wf = wave.open(wav_file, 'rb')
             if self.wf.getframerate() != self.sample_rate:
-                warnings.warn("The audio file sample rate does not match the"+
-                        "sample_rate of the models")
+                warnings.warn("The audio file sample rate does not match the "
+                              "sample_rate of the models")
             channels = self.wf.getnchannels()
-            assert(channels==1)
+            assert(channels == 1)
             format = self.p.get_format_from_width(self.wf.getsampwidth())
             input = False
         else:
@@ -259,26 +262,25 @@ class PlayStreaming(object):
         with open(preprocess_file, 'r') as f:
             self.preprocess = cPickle.load(f)
 
-
         ##### The following patch should be removed at some point ######
-        if isinstance(self.preprocess, 
+        if isinstance(self.preprocess,
                       pylearn2.datasets.preprocessing.Standardize):
             self.preprocess.invert = types.MethodType(icmc.Standardize.invert,
                                                       self.preprocess)
             self.preprocess.__class__ = icmc.Standardize
 
         if isinstance(self.preprocess, icmc.Pipeline):
-            self.preprocess.invert = types.MethodType(icmc.Pipeline.invert, 
+            self.preprocess.invert = types.MethodType(icmc.Pipeline.invert,
                                                       self.preprocess)
             for item in self.preprocess.items:
-                if isinstance(item, 
+                if isinstance(item,
                               pylearn2.datasets.preprocessing.Standardize):
                     item.invert = types.MethodType(icmc.Standardize.invert,
                                                    item)
                     item.__class__ = icmc.Standardize
         ################################################################
         if vocoder:
-            self.dphi = (2 * np.pi * self.nhop * 
+            self.dphi = (2 * np.pi * self.nhop *
                          np.arange(self.nfft/2+1)) / self.nfft
             self.phase = np.random.rand(self.nfft/2+1) * 2 * np.pi - np.pi
         self.vocoder = vocoder
@@ -298,7 +300,7 @@ class PlayStreaming(object):
                 params[-1]['act_enc'] = 'linear'
             elif hasattr(m.act_enc, 'name') and m.act_enc.name == 'sigmoid':
                 params[-1]['act_enc'] = 'sigmoid'
-            elif (hasattr(m.act_enc, 'func_name') and 
+            elif (hasattr(m.act_enc, 'func_name') and
                   m.act_enc.func_name == 'relu'):
                 params[-1]['act_enc'] = 'relu'
             else:
@@ -307,7 +309,7 @@ class PlayStreaming(object):
                 params[-1]['act_dec'] = 'linear'
             elif hasattr(m.act_dec, 'name') and m.act_dec.name == 'sigmoid':
                 params[-1]['act_dec'] = 'sigmoid'
-            elif (hasattr(m.act_dec, 'func_name') and 
+            elif (hasattr(m.act_dec, 'func_name') and
                          m.act_dec.func_name == 'relu'):
                 params[-1]['act_dec'] = 'relu'
             else:
@@ -335,7 +337,7 @@ class PlayStreaming(object):
         feat = self.feat
         if self.source == "file":
             wf = self.wf
-            ix  = wf.tell()
+            ix = wf.tell()
             data = wf.readframes(wfft)
             if len(data) < 2*wfft:
                 self.wf.rewind()
@@ -348,7 +350,7 @@ class PlayStreaming(object):
             data = np.array(struct.unpack("h"*nhop, data)) / 32768.
             self.m_buff[-nhop:] = data
             data = self.m_buff
-        #data *= (self.win * 2 / 3)        
+        # data *= (self.win * 2 / 3)
         fft = np.fft.rfft(data, nfft) / nfft
         X = np.abs(fft)
         if feat == 'cqft':
@@ -356,10 +358,10 @@ class PlayStreaming(object):
         if self.vocoder:
             phase = self.phase
             self.phase = (self.phase + np.pi + self.dphi) % (2 * np.pi) - np.pi
-            #self.phase = self.phase - 2*np.pi*np.round(self.phase/(2*np.pi))
-            #self.phase = (self.phase + np.pi) % (2 * np.pi) - np.pi
-            #self.phase = self.phase % (2 * np.pi)
-            #print(phase.shape)
+            # self.phase = self.phase - 2*np.pi*np.round(self.phase/(2*np.pi))
+            # self.phase = (self.phase + np.pi) % (2 * np.pi) - np.pi
+            # self.phase = self.phase % (2 * np.pi)
+            # print(phase.shape)
         else:
             phase = np.angle(fft)
         if self.is_processing:
@@ -395,7 +397,7 @@ class PlayStreaming(object):
         if a is not None:
             X = getattr(PlayStreaming, a)(X, **kwargs)
         return X
-     
+
     @staticmethod
     def linear(x, **kwargs):
         return x
@@ -424,9 +426,9 @@ class PlayStreaming(object):
             self.cmd_parse()
 
     def cmd_parse(self):
-        cmd,msg = self.queue.get() if not self.queue.empty() else ['',None]
+        cmd, msg = self.queue.get() if not self.queue.empty() else ['', None]
         if cmd != '':
-            #print(cmd)
+            # print(cmd)
             pass
         if cmd == "play_pause":
             if self.playing:
@@ -456,29 +458,32 @@ class PlayStreaming(object):
         exit(0)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Use a MIDI controller to '+
-                                     'play the code layer of a [deep] '+
-                                     'autoencoder.')
-    parser.add_argument('modelfile', help="a pickled deep composed "+
-                        "autoencoder trained with deepAE.py")
-    parser.add_argument('featurefile', help="a pickled feature params"+
-                        "file storing a dict of the params used to generate "+
-                        "the low level features")
-    parser.add_argument('preprocessfile', help="a pickled file "+
-                        "storing a pylearn2 preprocessor subclass instance")
-    parser.add_argument('-a', '--audiofile', help="an audio file to "+
-                        "resynthesize or -m to use your computer's input. If "+
-                        "none is specified the program uses the default input"+
-                        " device.")
-    parser.add_argument('-v', '--vocoder', action='store_true', default=False, 
+    parser = argparse.ArgumentParser(description=('Use a MIDI controller to '
+                                                  'play the code layer of a '
+                                                  '[deep] autoencoder.'))
+    parser.add_argument('modelfile',
+                        help=("a pickled deep composed "
+                              "autoencoder trained with deepAE.py"))
+    parser.add_argument('featurefile',
+                        help=("a pickled feature params "
+                              "file storing a dict of the params used to "
+                              "generate the low level features"))
+    parser.add_argument('preprocessfile',
+                        help=("a pickled file storing a pylearn2 preprocessor "
+                              "subclass instance"))
+    parser.add_argument('-a', '--audiofile',
+                        help=("an audio file to resynthesize or -m to use "
+                              "your computer's input. If none is specified "
+                              "the program uses the default input device."))
+    parser.add_argument('-v', '--vocoder', action='store_true', default=False,
                         help="channel voder if this flag set")
     args = parser.parse_args()
- 
+
     Q = multiprocessing.Queue()
-    P = multiprocessing.Process(target=PlayStreaming, 
+    P = multiprocessing.Process(target=PlayStreaming,
                                 args=(args.modelfile,
                                       args.featurefile,
-                                      args.preprocessfile, 
+                                      args.preprocessfile,
                                       args.audiofile,
                                       args.vocoder,
                                       Q))
