@@ -8,13 +8,14 @@ import itertools
 import sys
 import h5py
 
+
 def extract(arg):
-    fname,p,base = arg
+    fname, p, base = arg
     print(fname)
     F = features.Features(fname, p)
     key = os.path.basename(fname).split('.')[0]
     np.save(base+'/'+key+'.npy', F.X)
-        
+
 if __name__ == "__main__":
     which = sys.argv[1]
     p = features.Features.default_params()
@@ -65,7 +66,6 @@ if __name__ == "__main__":
     fnames = glob.glob('/scratch/sarroff/wav/*.wav')
     nproc = int(sys.argv[2])
     pool = Pool(processes=nproc)
-    pool.map(extract, zip(fnames, itertools.cycle([p]), 
+    pool.map(extract, zip(fnames, itertools.cycle([p]),
                           itertools.cycle([base])))
     exit(0)
-    

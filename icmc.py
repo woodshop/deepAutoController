@@ -3,7 +3,7 @@ import argparse
 import theano.tensor
 import h5py
 from pylearn2.models.autoencoder import DenoisingAutoencoder
-from pylearn2.model_extensions.model_extension import ModelExtension 
+from pylearn2.model_extensions.model_extension import ModelExtension
 from pylearn2.models import Model
 from pylearn2.costs.cost import Cost
 from pylearn2.costs.cost import DefaultDataSpecsMixin
@@ -19,29 +19,32 @@ from functools import wraps
 from pylearn2.costs.autoencoder import GSNFriendlyCost
 import types
 
+
 class ICMC(DenoisingAutoencoder):
     """
     Inherits the Denoising Autoencoder class but makes a few key changes:
     * Initial weights may be nonnegative
     * Allows the passing of a ModelExtension
     """
-    def __init__(self, corruptor, nvis, nhid, act_enc, act_dec, 
-                 tied_weights=True, irange=0.05, 
+    def __init__(self, corruptor, nvis, nhid, act_enc, act_dec,
+                 tied_weights=True, irange=0.05,
                  rng=9001, weights_nonnegative=False, extensions=None):
-        super(ICMC, self).__init__(corruptor, nvis, nhid, act_enc, act_dec, 
+        super(ICMC, self).__init__(corruptor, nvis, nhid, act_enc, act_dec,
                                    tied_weights, irange, rng)
         Model.__init__(self, extensions)
         if weights_nonnegative:
             self._params[2].set_value((self._params[2]+irange/2.0).eval())
             if not tied_weights:
                 self._params[3].set_value((self._params[3]+irange/2.0).eval())
-        self.weights_nonnegative = weights_nonnegative        
+        self.weights_nonnegative = weights_nonnegative
+
 
 def relu(x):
     """
     Rectified linear activation
     """
     return theano.tensor.switch(x > 0., x, 0.0)
+
 
 class AsymWeightDecay(ModelExtension):
     """
@@ -53,15 +56,16 @@ class AsymWeightDecay(ModelExtension):
     def __init__(self, decayP=0, decayN=1, decay_bias=False):
         self.__dict__.update(locals())
         del self.self
-        
+
     def post_modify_updates(self, updates):
         update_weights = ['W', 'Wprime']
         if self.decay_bias:
             update_weights.extend(['vb', 'hb'])
-        for k,v in updates.items():
+        for k, v in updates.items():
             if k.name in update_weights:
-                updates[k] = v - theano.tensor.where(v < 0, v * self.decayN, 
+                updates[k] = v - theano.tensor.where(v < 0, v * self.decayN,
                                                      v * self.decayP)
+
 
 class L1(DefaultDataSpecsMixin, Cost):
     """
@@ -98,17 +102,19 @@ class L1(DefaultDataSpecsMixin, Cost):
         assert total_cost.ndim == 0
         return total_cost
 
+
 class MeanRelativeSquaredReconstructionError(GSNFriendlyCost):
     """
-    Do not use this class as a learning objective. It is only meant 
+    Do not use this class as a learning objective. It is only meant
     for comparing already-trained model. The entire test set must be passed to
     as input to this evaluator.
     """
     @staticmethod
     def cost(a, b):
-        val1 =  ((a - b) ** 2).sum(axis=1)
+        val1 = ((a - b) ** 2).sum(axis=1)
         val2 = ((a - a.mean(axis=0)) ** 2).sum(axis=1)
         return (val1/val2).mean()
+
 
 class Normalize(Preprocessor):
     def __init__(self, global_max=False):
@@ -125,14 +131,15 @@ class Normalize(Preprocessor):
                                  "has no stored max")
         new = X / self._max
         dataset.set_design_matrix(new)
-        
+
     def invert(self, dataset):
         X = dataset.get_design_matrix()
         if self._max is None:
             raise ValueError("cNormalize object has no stored max")
         new = X * self._max
         dataset.set_design_matrix(new)
-    
+
+
 class LogScale(Preprocessor):
     def __init__(self):
         self._max = None
@@ -153,24 +160,27 @@ class LogScale(Preprocessor):
         new = 10 ** X
         dataset.set_design_matrix(new)
 
+
 class Standardize(Standardize):
     def invert(self, dataset):
         X = dataset.get_design_matrix()
         new = X * (self._std_eps + self._std) + self._mean
         dataset.set_design_matrix(new)
 
+
 class Pipeline(Pipeline):
     def invert(self, dataset):
         for item in self.items[::-1]:
             item.invert(dataset)
+
 
 # Currently not used because loading from disk onto GPU is too slow
 class HDF5Dataset(HDF5Dataset):
     def __init__(self, filename, X=None, topo_view=None, y=None,
                  load_all=False, **kwargs):
         if 'preprocessor' in kwargs:
-            if ('fit_preprocessor' in kwargs and 
-                kwargs['fit_preprocessor'] is False) or ('fit_preprocessor' 
+            if ('fit_preprocessor' in kwargs and
+                kwargs['fit_preprocessor'] is False) or ('fit_preprocessor'
                                                          not in kwargs):
                 self._preprocessor = kwargs['preprocessor']
                 kwargs['preprocessor'] = None
@@ -194,6 +204,7 @@ class HDF5Dataset(HDF5Dataset):
         iterator.__class__ = HDF5DatasetIterator
         iterator._preprocessor = self._preprocessor
         return iterator
+
 
 class HDF5DatasetIterator(HDF5DatasetIterator):
     def next(self):
@@ -221,7 +232,8 @@ class HDF5DatasetIterator(HDF5DatasetIterator):
         rval = tuple(rval)
         if not self._return_tuple and len(rval) == 1:
             rval, = rval
-        return rval    
+        return rval
+
 
 def populate_autoencoder_yaml(args, n_layers, nvis):
     autoencoder_template = """!obj:icmc.ICMC {
@@ -256,22 +268,22 @@ def populate_autoencoder_yaml(args, n_layers, nvis):
             nvis = args['units'][i-1]
         tied_weights = ('false' if args['tied_weights'][i] in
                         ['False', '0'] else args['tied_weights'][i])
-        weights_nonnegative = ('false' if args['weights_nonnegative'][i] in 
+        weights_nonnegative = ('false' if args['weights_nonnegative'][i] in
                            ['False', '0'] else args['weights_nonnegative'][i])
         act_enc = ('!import icmc.relu' if args['encoding'][i] == 'relu'
                    else args['encoding'][i])
         act_dec = ('!import icmc.relu' if args['decoding'][i] == 'relu'
                    else args['decoding'][i])
         yamls.append(autoencoder_template % {
-                'decayP':args['positive_decay'][i],
-                'decayN':args['negative_decay'][i],
-                'stdev':args['corruption'][i],
-                'nvis':nvis,
-                'nhid':args['units'][i],
-                'act_enc':act_enc,
-                'act_dec':act_dec,
-                'tied_weights':tied_weights,
-                'weights_nonnegative':weights_nonnegative,
+                'decayP': args['positive_decay'][i],
+                'decayN': args['negative_decay'][i],
+                'stdev': args['corruption'][i],
+                'nvis': nvis,
+                'nhid': args['units'][i],
+                'act_enc': act_enc,
+                'act_dec': act_dec,
+                'tied_weights': tied_weights,
+                'weights_nonnegative': weights_nonnegative,
                 'irange': args['irange'][i]})
         if sparsity:
             coeffs_yaml = coeffs_yaml.format(args['sparsity'][i])
@@ -283,7 +295,8 @@ def populate_autoencoder_yaml(args, n_layers, nvis):
     autoencoder_yaml += "]"
     if sparsity:
         coeffs_yaml += "]}]"
-    return autoencoder_yaml,coeffs_yaml
+    return autoencoder_yaml, coeffs_yaml
+
 
 def populate_yaml(args, n_layers):
     print("Inserting variables into template: "+args['yaml-template'])
@@ -291,27 +304,30 @@ def populate_yaml(args, n_layers):
         yaml = f.read()
     base = '/global/data/casey/sarroff/projects/deepAE/data'
 
-    kwargs = {} 
-    kwargs['train_fn'] = (base+'/feat/'+args['feature']+'/'+
-                          args['feature']+'_train.h5')
+    kwargs = {}
+    kwargs['train_fn'] = "%s/feat/%s/%s_train.h5" % (base,
+                                                     args['feature'],
+                                                     args['feature'])
     print("Opening "+kwargs['train_fn'])
     h5file = h5py.File(kwargs['train_fn'], 'r')
     nvis = h5file['data'].shape[1]
     h5file.close()
     kwargs['preproc_pkl'] = args['preproc-pkl']
-    kwargs['test_fn'] = (base+'/feat/'+args['feature']+'/'+
+    kwargs['test_fn'] = (base+'/feat/'+args['feature'] + '/' +
                          args['feature']+'_test.h5')
-    kwargs['val_fn'] = (base+'/feat/'+args['feature']+'/'+
+    kwargs['val_fn'] = (base+'/feat/'+args['feature'] + '/' +
                         args['feature']+'_val.h5')
-    autoencoder_yaml,coeffs_yaml = (populate_autoencoder_yaml
-                                    (args, n_layers, nvis))
+    autoencoder_yaml, coeffs_yaml = (populate_autoencoder_yaml
+                                     (args, n_layers, nvis))
     kwargs['autoencoders'] = autoencoder_yaml
     kwargs['coeffs'] = coeffs_yaml
     kwargs['learning_rate'] = args['learning-rate']
-    kwargs['save_path'] = (args['save-directory']+'/'+args['save-prefix']+
-                           '_'+args['feature']+'.pkl')
-    kwargs['save_path_best'] = (args['save-directory']+'/'+args['save-prefix']+
-                                '_'+args['feature']+'_best.pkl')
+    kwargs['save_path'] = "%s/%s_%s.pkl" % (args['save-directory'],
+                                            args['save-prefix'],
+                                            args['feature'])
+    kwargs['save_path_best'] = "%s/%s_%s_best.pkl" % (args['save-directory'],
+                                                      args['save-prefix'],
+                                                      args['feature'])
     yaml = yaml % kwargs
     return yaml
 
@@ -321,31 +337,34 @@ if __name__ == "__main__":
     parser.add_argument('save-prefix', help="Prefix for model name")
     parser.add_argument('yaml-template', help="Location of template")
     parser.add_argument('preproc-pkl', help="Location of pickled preprocessor")
-    parser.add_argument('feature', choices=['stft', 'cqft_3bpo', 
+    parser.add_argument('feature', choices=['stft', 'cqft_3bpo',
                                             'cqft_12bpo', 'stft_orig'],
                         help="Which low level feature to use")
     parser.add_argument('learning-rate', type=float,
                         help="The initial global learning rate")
     parser.add_argument('-u', '--units', nargs='+', type=int,
-                        help="An integer for the number of units in "+
-                        "each hidden layer")
-    parser.add_argument('-e', '--encoding', nargs='+', 
+                        help=("An integer for the number of units in "
+                              "each hidden layer"))
+    parser.add_argument('-e', '--encoding', nargs='+',
                         choices=['sigmoid', 'relu', 'linear'],
                         help="Encoding function for each layer")
-    parser.add_argument('-d', '--decoding', nargs='+', 
+    parser.add_argument('-d', '--decoding', nargs='+',
                         choices=['sigmoid', 'relu', 'linear'],
                         help="decoding function for each layer")
     parser.add_argument('-t', '--tied-weights', nargs='+',
-                        help="List of booleans indicating if tied weights"+
-                        "should be used", default=["true"])
-    parser.add_argument('-w', '--weights-nonnegative', nargs='+', 
-                        help="List of booleans indicating if nonnegative "+
-                        "weights should be used", default=["true"])
+                        help=("List of booleans indicating if tied weights "
+                              "should be used"),
+                        default=["true"])
+    parser.add_argument('-w', '--weights-nonnegative', nargs='+',
+                        help=("List of booleans indicating if nonnegative "
+                              "weights should be used"),
+                        default=["true"])
     parser.add_argument('-i', '--irange', nargs='+', type=float,
-                        help="Range for weight initialization. If "+
-                        "weights-nonnegative is set to True, the initial"+
-                        "weights are also positive. Otherwise initial weights"+
-                        "are centered around 0", required=True)
+                        help=("Range for weight initialization. If "
+                              "weights-nonnegative is set to True, the initial"
+                              "weights are also positive. Otherwise initial "
+                              "weightsare centered around 0"),
+                        required=True)
     parser.add_argument('-p', '--positive-decay', type=float, nargs='+',
                         default=[0.0],
                         help="Positive weight decay")
@@ -360,15 +379,14 @@ if __name__ == "__main__":
                         help="Sparsity coefficient for layer activations")
     args = vars(parser.parse_args())
     n_layers = len(args['units'])
-    for k,v in args.items():
-        if k not in ['feature', 'learning-rate', 'yaml-template', 
+    for k, v in args.items():
+        if k not in ['feature', 'learning-rate', 'yaml-template',
                      'save-directory', 'save-prefix', 'preproc-pkl']:
             assert len(v) == n_layers
-                
+
     yaml = populate_yaml(args, n_layers)
-    with open(args['save-directory']+'/'+args['save-prefix']+'.yaml', 
+    with open(args['save-directory']+'/'+args['save-prefix']+'.yaml',
               'w') as f:
         f.write(yaml)
     train = yaml_parse.load(yaml)
     train.main_loop()
-
